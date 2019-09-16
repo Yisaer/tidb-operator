@@ -71,7 +71,7 @@ pd:
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
   # refer to https://kubernetes.io/docs/concepts/storage/storage-classes
-  storageClassName: local-storage
+  storageClassName: standard
 
   # Image pull policy.
   imagePullPolicy: IfNotPresent
@@ -205,7 +205,7 @@ tikv:
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
   # refer to https://kubernetes.io/docs/concepts/storage/storage-classes
-  storageClassName: local-storage
+  storageClassName: standard
 
   # Image pull policy.
   imagePullPolicy: IfNotPresent
@@ -262,13 +262,13 @@ tidb:
   # The secret name of root password, you can create secret with following command:
   # kubectl create secret generic tidb-secret --from-literal=root=<root-password> --namespace=<namespace>
   # If unset, the root password will be empty and you can set it after connecting
-  # passwordSecretName: tidb-secret
+  passwordSecretName: tidb-secret
   # permitHost is the host which will only be allowed to connect to the TiDB.
   # If unset, defaults to '%' which means allow any host to connect to the TiDB.
   # permitHost: 127.0.0.1
   # initSql is the SQL statements executed after the TiDB cluster is bootstrapped.
-  # initSql: |-
-  #   create database app;
+  initSql: |-
+    create database app;
   image: pingcap/tidb:v3.0.1
   # Image pull policy.
   imagePullPolicy: IfNotPresent
@@ -352,7 +352,7 @@ mysqlClient:
   imagePullPolicy: IfNotPresent
 
 monitor:
-  create: true
+  create: false
   # Also see rbac.create
   # If you set rbac.create to false, you need to provide a value here.
   # If you set rbac.create to true, you should leave this empty.
