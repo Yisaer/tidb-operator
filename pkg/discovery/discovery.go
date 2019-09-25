@@ -74,22 +74,24 @@ func (td *tidbDiscovery) Discover(advertisePeerUrl string) (string, error) {
 		return "", fmt.Errorf("advertisePeerUrl format is wrong: %s", advertisePeerUrl)
 	}
 
-
+	// 获取信息
 	podName, peerServiceName, ns := strArr[0], strArr[1], strArr[2]
 	tcName := strings.TrimSuffix(peerServiceName, "-pd-peer")
 	podNamespace := os.Getenv("MY_POD_NAMESPACE")
 	if ns != podNamespace {
 		return "", fmt.Errorf("the peer's namespace: %s is not equal to discovery namespace: %s", ns, podNamespace)
 	}
+	// 获取TidbCluster Spec
 	tc, err := td.tcGetFn(ns, tcName)
 	if err != nil {
 		log.Println("td.tcGetFn Error " + podName)
 		return "", err
 	}
 	keyName := fmt.Sprintf("%s/%s", ns, tcName)
+	// 获取TidbCluster定义的 pd replicas
 	// TODO: the replicas should be the total replicas of pd sets.
 	replicas := tc.Spec.PD.Replicas
-
+	// 进程内维护currentCluster
 	currentCluster := td.clusters[keyName]
 	if currentCluster == nil || currentCluster.resourceVersion != tc.ResourceVersion {
 		td.clusters[keyName] = &clusterInfo{
