@@ -15,7 +15,9 @@ package discovery
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -56,9 +58,13 @@ func NewTiDBDiscovery(cli versioned.Interface) TiDBDiscovery {
 }
 
 func (td *tidbDiscovery) Discover(advertisePeerUrl string) (string, error) {
+
+	// 加锁，每次只能有一个请求同时访问Discover方法
 	td.lock.Lock()
+	// 释放锁
 	defer td.lock.Unlock()
 
+	// 防御性检查
 	if advertisePeerUrl == "" {
 		return "", fmt.Errorf("advertisePeerUrl is empty")
 	}
@@ -68,6 +74,7 @@ func (td *tidbDiscovery) Discover(advertisePeerUrl string) (string, error) {
 		return "", fmt.Errorf("advertisePeerUrl format is wrong: %s", advertisePeerUrl)
 	}
 
+
 	podName, peerServiceName, ns := strArr[0], strArr[1], strArr[2]
 	tcName := strings.TrimSuffix(peerServiceName, "-pd-peer")
 	podNamespace := os.Getenv("MY_POD_NAMESPACE")
@@ -76,6 +83,7 @@ func (td *tidbDiscovery) Discover(advertisePeerUrl string) (string, error) {
 	}
 	tc, err := td.tcGetFn(ns, tcName)
 	if err != nil {
+		log.Println("td.tcGetFn Error " + podName)
 		return "", err
 	}
 	keyName := fmt.Sprintf("%s/%s", ns, tcName)
@@ -92,21 +100,27 @@ func (td *tidbDiscovery) Discover(advertisePeerUrl string) (string, error) {
 	currentCluster = td.clusters[keyName]
 	currentCluster.peers[podName] = struct{}{}
 
+	log.Println("peerUrl = " + advertisePeerUrl + ",podName = " + podName + " ,peerServiceName = " + peerServiceName + ", currentClusterPeers size = " + strconv.Itoa(len(currentCluster.peers)) + ", replicas = " + strconv.FormatInt(int64(replicas), 10))
+	strpeerLen := strconv.Itoa(len(currentCluster.peers))
+	strReplicas := strconv.FormatInt(int64(replicas), 10)
 	if len(currentCluster.peers) == int(replicas) {
 		delete(currentCluster.peers, podName)
+		log.Println("initial-cluster for " + podName + " peers = " + strpeerLen + ",replicas = " + strReplicas)
 		return fmt.Sprintf("--initial-cluster=%s=%s://%s", podName, tc.Scheme(), advertisePeerUrl), nil
 	}
 
 	pdClient := td.pdControl.GetPDClient(pdapi.Namespace(tc.GetNamespace()), tc.GetName(), tc.Spec.EnableTLSCluster)
 	membersInfo, err := pdClient.GetMembers()
 	if err != nil {
+		log.Println("pdClient error " + podName + ",error = " + err.Error())
 		return "", err
 	}
 
 	membersArr := make([]string, 0)
-	for _, member := range membersInfo.Members {
+	for id, member := range membersInfo.Members {
 		memberURL := strings.ReplaceAll(member.PeerUrls[0], ":2380", ":2379")
 		membersArr = append(membersArr, memberURL)
+		log.Println("id = " + strconv.Itoa(id) + ",memberURL = " + memberURL)
 	}
 	delete(currentCluster.peers, podName)
 	return fmt.Sprintf("--join=%s", strings.Join(membersArr, ",")), nil

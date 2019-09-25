@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -273,8 +274,10 @@ func (pc *pdClient) GetCluster() (*metapb.Cluster, error) {
 
 func (pc *pdClient) GetMembers() (*MembersInfo, error) {
 	apiURL := fmt.Sprintf("%s/%s", pc.url, membersPrefix)
+	log.Println("pd getmembers apiURL = " + apiURL)
 	body, err := httputil.GetBodyOK(pc.httpClient, apiURL)
 	if err != nil {
+		log.Println("pd getmemebers error " +err.Error())
 		return nil, err
 	}
 	members := &MembersInfo{}

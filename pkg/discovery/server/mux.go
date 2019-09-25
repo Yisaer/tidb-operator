@@ -13,6 +13,7 @@
 
 package server
 
+
 import (
 	"encoding/base64"
 	"fmt"
@@ -30,7 +31,7 @@ type server struct {
 }
 
 // StartServer starts a TiDB Discovery server
-func StartServer(cli versioned.Interface, port int) {
+func  StartServer(cli versioned.Interface, port int) {
 	svr := &server{discovery.NewTiDBDiscovery(cli)}
 
 	ws := new(restful.WebService)

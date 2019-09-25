@@ -12,7 +12,7 @@ rbac:
 operatorImage: pingcap/tidb-operator:v1.0.1
 imagePullPolicy: IfNotPresent
 
-defaultStorageClassName: local-storage
+defaultStorageClassName: hostpath
 
 # tidbBackupManagerImage is tidb backup manager image
 # tidbBackupManagerImage: pingcap/tidb-backup-manager:latest
