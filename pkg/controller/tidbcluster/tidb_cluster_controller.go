@@ -83,6 +83,7 @@ func NewController(
 		Interface: eventv1.New(kubeCli.CoreV1().RESTClient()).Events("")})
 	recorder := eventBroadcaster.NewRecorder(v1alpha1.Scheme, corev1.EventSource{Component: "tidbcluster"})
 
+	// 获取各类资源的Informer
 	tcInformer := informerFactory.Pingcap().V1alpha1().TidbClusters()
 	setInformer := kubeInformerFactory.Apps().V1beta1().StatefulSets()
 	svcInformer := kubeInformerFactory.Core().V1().Services()
@@ -92,6 +93,7 @@ func NewController(
 	podInformer := kubeInformerFactory.Core().V1().Pods()
 	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 
+	// 构造各类资源的Controller
 	tcControl := controller.NewRealTidbClusterControl(cli, tcInformer.Lister(), recorder)
 	pdControl := pdapi.NewDefaultPDControl()
 	tidbControl := controller.NewDefaultTiDBControl()
@@ -100,11 +102,17 @@ func NewController(
 	pvControl := controller.NewRealPVControl(kubeCli, pvcInformer.Lister(), pvInformer.Lister(), recorder)
 	pvcControl := controller.NewRealPVCControl(kubeCli, recorder, pvcInformer.Lister())
 	podControl := controller.NewRealPodControl(kubeCli, pdControl, podInformer.Lister(), recorder)
+
+	//构造Scaler
 	pdScaler := mm.NewPDScaler(pdControl, pvcInformer.Lister(), pvcControl)
 	tikvScaler := mm.NewTiKVScaler(pdControl, pvcInformer.Lister(), pvcControl, podInformer.Lister())
+
+	// 构造Failover
 	pdFailover := mm.NewPDFailover(cli, pdControl, pdFailoverPeriod, podInformer.Lister(), podControl, pvcInformer.Lister(), pvcControl, pvInformer.Lister())
 	tikvFailover := mm.NewTiKVFailover(tikvFailoverPeriod)
 	tidbFailover := mm.NewTiDBFailover(tidbFailoverPeriod)
+
+	//构造Upgrader
 	pdUpgrader := mm.NewPDUpgrader(pdControl, podControl, podInformer.Lister())
 	tikvUpgrader := mm.NewTiKVUpgrader(pdControl, podControl, podInformer.Lister())
 	tidbUpgrader := mm.NewTiDBUpgrader(tidbControl, podInformer.Lister())
@@ -185,6 +193,8 @@ func NewController(
 		),
 	}
 
+	// 对于其他资源的Informer，只是使用了Lister组件
+	// TC资源与Statefulset资源则注册了专门的事件处理
 	tcInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: tcc.enqueueTidbCluster,
 		UpdateFunc: func(old, cur interface{}) {

@@ -55,6 +55,7 @@ var (
 )
 
 func init() {
+	// 参数解析
 	flag.BoolVar(&printVersion, "V", false, "Show version and quit")
 	flag.BoolVar(&printVersion, "version", false, "Show version and quit")
 	flag.IntVar(&workers, "workers", 5, "The number of workers that are allowed to sync concurrently. Larger number = more responsive management, but more CPU (and network) load")
@@ -92,6 +93,7 @@ func main() {
 		glog.Fatal("NAMESPACE environment variable not set")
 	}
 
+	// 获取api server token
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		glog.Fatalf("failed to get config: %v", err)
@@ -101,13 +103,21 @@ func main() {
 	if err != nil {
 		glog.Fatalf("failed to create Clientset: %v", err)
 	}
+
+	// 构建kube Client
 	kubeCli, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		glog.Fatalf("failed to get kubernetes Clientset: %v", err)
 	}
 
+	// PingCap 资源的Informer组件
 	var informerFactory informers.SharedInformerFactory
+
+
+	// K8S的原生Informer组件资源
 	var kubeInformerFactory kubeinformers.SharedInformerFactory
+
+	// Controller是否全集群监听
 	if controller.ClusterScoped {
 		informerFactory = informers.NewSharedInformerFactory(cli, controller.ResyncDuration)
 		kubeInformerFactory = kubeinformers.NewSharedInformerFactory(kubeCli, controller.ResyncDuration)
@@ -123,6 +133,7 @@ func main() {
 		kubeInformerFactory = kubeinformers.NewSharedInformerFactoryWithOptions(kubeCli, controller.ResyncDuration, kubeoptions...)
 	}
 
+	// Controller全局锁，用于保证每次只有一个Leader，进行资源的修改
 	rl := resourcelock.EndpointsLock{
 		EndpointsMeta: metav1.ObjectMeta{
 			Namespace: ns,
@@ -135,7 +146,10 @@ func main() {
 		},
 	}
 
+	// TC Controller
 	tcController := tidbcluster.NewController(kubeCli, cli, informerFactory, kubeInformerFactory, autoFailover, pdFailoverPeriod, tikvFailoverPeriod, tidbFailoverPeriod)
+
+
 	backupController := backup.NewController(kubeCli, cli, informerFactory, kubeInformerFactory)
 	restoreController := restore.NewController(kubeCli, cli, informerFactory, kubeInformerFactory)
 	bsController := backupschedule.NewController(kubeCli, cli, informerFactory, kubeInformerFactory)
@@ -147,6 +161,7 @@ func main() {
 	kubeInformerFactory.Start(controllerCtx.Done())
 
 	// Wait for all started informers' cache were synced.
+	// Informer组件本地缓存
 	for v, synced := range informerFactory.WaitForCacheSync(wait.NeverStop) {
 		if !synced {
 			glog.Fatalf("error syncing informer for %v", v)
@@ -159,6 +174,7 @@ func main() {
 	}
 	glog.Infof("cache of informer factories sync successfully")
 
+	// 将Controller逻辑放到各个goroutine中执行
 	onStarted := func(ctx context.Context) {
 		go wait.Forever(func() { backupController.Run(workers, ctx.Done()) }, waitDuration)
 		go wait.Forever(func() { restoreController.Run(workers, ctx.Done()) }, waitDuration)
