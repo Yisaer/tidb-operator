@@ -200,5 +200,6 @@ func main() {
 		})
 	}, waitDuration)
 
+	// 监听端口，主goroutine 阻塞运行
 	glog.Fatal(http.ListenAndServe(":6060", nil))
 }
