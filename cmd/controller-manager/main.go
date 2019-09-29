@@ -185,6 +185,7 @@ func main() {
 		glog.Fatalf("leader election lost")
 	}
 
+	// 多controller实例时进行leader竞选
 	// leader election for multiple tidb-cloud-manager
 	go wait.Forever(func() {
 		leaderelection.RunOrDie(controllerCtx, leaderelection.LeaderElectionConfig{
