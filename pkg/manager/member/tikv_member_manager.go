@@ -161,6 +161,7 @@ func (tkmm *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCl
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
+	// 构造 statefulSet
 	newSet, err := tkmm.getNewSetForTidbCluster(tc)
 	if err != nil {
 		return err

@@ -47,6 +47,7 @@ func (psd *pdScaler) ScaleOut(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet
 		return nil
 	}
 
+	// 当集群组件先缩容时，对应POD的PVC会打上deferDeleting的Annotation，然后进行扩容时，需要将曾经deferDeleting的PVC删掉
 	_, err := psd.deleteDeferDeletingPVC(tc, oldSet.GetName(), v1alpha1.PDMemberType, *oldSet.Spec.Replicas)
 	if err != nil {
 		resetReplicas(newSet, oldSet)
@@ -84,6 +85,7 @@ func (psd *pdScaler) ScaleOut(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet
 
 // We need remove member from cluster before reducing statefulset replicas
 // only remove one member at a time when scale down
+// 缩容时会先通知PD集群进行删除成员，然后将PVC打上标签，最后单步缩容statefulset 实例数
 func (psd *pdScaler) ScaleIn(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()

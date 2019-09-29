@@ -88,6 +88,7 @@ func (tsd *tikvScaler) ScaleIn(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSe
 				resetReplicas(newSet, oldSet)
 				return err
 			}
+			// 先通知PD集群将对应的TIKV实例进行下线
 			if state != v1alpha1.TiKVStateOffline {
 				if err := controller.GetPDClient(tsd.pdControl, tc).DeleteStore(id); err != nil {
 					glog.Errorf("tikv scale in: failed to delete store %d, %v", id, err)

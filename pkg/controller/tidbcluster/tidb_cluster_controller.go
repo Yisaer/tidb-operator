@@ -284,7 +284,7 @@ func (tcc *Controller) sync(key string) error {
 	if err != nil {
 		return err
 	}
-
+	log.Println("get tc " + tc.Status.ClusterID )
 	return tcc.syncTidbCluster(tc.DeepCopy())
 }
 
