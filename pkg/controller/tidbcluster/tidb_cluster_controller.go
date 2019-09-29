@@ -15,6 +15,7 @@ package tidbcluster
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang/glog"
@@ -263,6 +264,8 @@ func (tcc *Controller) processNextWorkItem() bool {
 
 // sync syncs the given tidbcluster.
 func (tcc *Controller) sync(key string) error {
+	log.Println("tidbcluster controller sync key = " + key)
+	// key的组成是 namespace/实例名
 	startTime := time.Now()
 	defer func() {
 		glog.V(4).Infof("Finished syncing TidbCluster %q (%v)", key, time.Since(startTime))
@@ -272,6 +275,7 @@ func (tcc *Controller) sync(key string) error {
 	if err != nil {
 		return err
 	}
+	// 获取当前的对应的tc实例
 	tc, err := tcc.tcLister.TidbClusters(ns).Get(name)
 	if errors.IsNotFound(err) {
 		glog.Infof("TidbCluster has been deleted %v", key)

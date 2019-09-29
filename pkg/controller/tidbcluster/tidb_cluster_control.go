@@ -73,12 +73,15 @@ func (tcc *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster
 	var errs []error
 	oldStatus := tc.Status.DeepCopy()
 
+	// 更新TiDB Cluster所对应的实例
 	if err := tcc.updateTidbCluster(tc); err != nil {
 		errs = append(errs, err)
 	}
 	if apiequality.Semantic.DeepEqual(&tc.Status, oldStatus) {
 		return errorutils.NewAggregate(errs)
 	}
+
+	// 更新tidbcluster api
 	if _, err := tcc.tcControl.UpdateTidbCluster(tc.DeepCopy(), &tc.Status, oldStatus); err != nil {
 		errs = append(errs, err)
 	}
@@ -87,11 +90,14 @@ func (tcc *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster
 }
 
 func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) error {
+
+	// 同步PV的回收策略
 	// syncing all PVs managed by operator's reclaim policy to Retain
 	if err := tcc.reclaimPolicyManager.Sync(tc); err != nil {
 		return err
 	}
 
+	// 清空孤儿POD
 	// cleaning all orphan pods(pd or tikv which don't have a related PVC) managed by operator
 	if _, err := tcc.orphanPodsCleaner.Clean(tc); err != nil {
 		return err

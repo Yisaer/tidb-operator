@@ -73,7 +73,7 @@ pd:
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
   # refer to https://kubernetes.io/docs/concepts/storage/storage-classes
-  storageClassName: local-storage
+  storageClassName: hostpath
 
   # Image pull policy.
   imagePullPolicy: IfNotPresent
@@ -215,7 +215,7 @@ tikv:
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
   # refer to https://kubernetes.io/docs/concepts/storage/storage-classes
-  storageClassName: local-storage
+  storageClassName: hostpath
 
   # Image pull policy.
   imagePullPolicy: IfNotPresent
@@ -382,7 +382,7 @@ mysqlClient:
   imagePullPolicy: IfNotPresent
 
 monitor:
-  create: true
+  create: false
   # Also see rbac.create
   # If you set rbac.create to false, you need to provide a value here.
   # If you set rbac.create to true, you should leave this empty.

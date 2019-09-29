@@ -96,6 +96,7 @@ func (tkmm *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
+	// 等到PD就绪后才能开始同步TiKV
 	if !tc.PDIsAvailable() {
 		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName)
 	}

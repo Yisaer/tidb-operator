@@ -9,10 +9,10 @@ rbac:
   create: true
 
 # operatorImage is TiDB Operator image
-operatorImage: pingcap/tidb-operator:v1.0.1
+operatorImage: yisa/operator:0.1.4
 imagePullPolicy: IfNotPresent
 
-defaultStorageClassName: local-storage
+defaultStorageClassName: hostpath
 
 # tidbBackupManagerImage is tidb backup manager image
 # tidbBackupManagerImage: pingcap/tidb-backup-manager:latest

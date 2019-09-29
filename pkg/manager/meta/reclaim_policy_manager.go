@@ -40,21 +40,25 @@ func NewReclaimPolicyManager(pvcLister corelisters.PersistentVolumeClaimLister,
 
 func (rpm *reclaimPolicyManager) Sync(tc *v1alpha1.TidbCluster) error {
 	ns := tc.GetNamespace()
+	// helm release name
 	instanceName := tc.GetLabels()[label.InstanceLabelKey]
 
 	l, err := label.New().Instance(instanceName).Selector()
 	if err != nil {
 		return err
 	}
+	// 将属于这个tc的 pvcs全部拿出来
 	pvcs, err := rpm.pvcLister.PersistentVolumeClaims(ns).List(l)
 	if err != nil {
 		return err
 	}
 
+
 	for _, pvc := range pvcs {
 		if pvc.Spec.VolumeName == "" {
 			continue
 		}
+		// 获取与这个PVC相对应的PV部分
 		pv, err := rpm.pvLister.Get(pvc.Spec.VolumeName)
 		if err != nil {
 			return err
