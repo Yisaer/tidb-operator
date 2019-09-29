@@ -15,6 +15,7 @@ package member
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/golang/glog"
@@ -211,6 +212,7 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 		}
 	}
 
+	// 升级
 	if !templateEqual(newPDSet.Spec.Template, oldPDSet.Spec.Template) || tc.Status.PD.Phase == v1alpha1.UpgradePhase {
 		if err := pmm.pdUpgrader.Upgrade(tc, oldPDSet, newPDSet); err != nil {
 			return err
@@ -260,6 +262,7 @@ func (pmm *pdMemberManager) updateStatefulSet(tc *v1alpha1.TidbCluster, newPDSet
 	return nil
 }
 
+// 同步PD信息填入 TidbCluster PD Status中
 func (pmm *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *apps.StatefulSet) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
@@ -270,6 +273,8 @@ func (pmm *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set 
 	if err != nil {
 		return err
 	}
+
+	// 修改状态为 upgrade状态
 	if upgrading {
 		tc.Status.PD.Phase = v1alpha1.UpgradePhase
 	} else {
@@ -402,6 +407,7 @@ func (pmm *pdMemberManager) getNewPDHeadlessServiceForTidbCluster(tc *v1alpha1.T
 }
 
 func (pmm *pdMemberManager) pdStatefulSetIsUpgrading(set *apps.StatefulSet, tc *v1alpha1.TidbCluster) (bool, error) {
+	// 如果StatefulSet 处于Upgrading状态 就会返回true
 	if statefulSetIsUpgrading(set) {
 		return true, nil
 	}
@@ -619,7 +625,7 @@ func (pmm *pdMemberManager) getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster) 
 				}},
 		},
 	}
-
+	log.Println("pdSet memory" + strconv.FormatInt(pdSet.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().Value(), 10) + ",tc spec memory = " + tc.Spec.PD.Requests.Memory)
 	return pdSet, nil
 }
 

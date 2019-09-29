@@ -74,6 +74,7 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 			return controller.RequeueErrorf("tidbcluster: [%s/%s]'s pd pod: [%s] has no label: %s", ns, tcName, podName, apps.ControllerRevisionHashLabelKey)
 		}
 
+		// 检查是否已经是最新状态
 		if revision == tc.Status.PD.StatefulSet.UpdateRevision {
 			if member, exist := tc.Status.PD.Members[podName]; !exist || !member.Health {
 				return controller.RequeueErrorf("tidbcluster: [%s/%s]'s pd upgraded pod: [%s] is not ready", ns, tcName, podName)
@@ -91,6 +92,7 @@ func (pu *pdUpgrader) upgradePDPod(tc *v1alpha1.TidbCluster, ordinal int32, newS
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 	upgradePodName := pdPodName(tcName, ordinal)
+	// 如果被升级的目标是Leader，就先将Leader进行转移
 	if tc.Status.PD.Leader.Name == upgradePodName && tc.Status.PD.StatefulSet.Replicas > 1 {
 		lastOrdinal := tc.Status.PD.StatefulSet.Replicas - 1
 		var targetName string

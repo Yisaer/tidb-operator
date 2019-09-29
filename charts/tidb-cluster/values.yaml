@@ -84,7 +84,7 @@ pd:
     #   memory: 8Gi
     requests:
       # cpu: 4000m
-      # memory: 4Gi
+      memory: 212Mi
       storage: 1Gi
 
   ## affinity defines pd scheduling rules,it's default settings is empty.

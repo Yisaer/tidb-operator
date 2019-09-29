@@ -58,6 +58,7 @@ func statefulSetIsUpgrading(set *apps.StatefulSet) bool {
 	if set.Status.ObservedGeneration == nil {
 		return false
 	}
+	// 当前revision 与 update Revision不一致即可判断正在升级中
 	if set.Status.CurrentRevision != set.Status.UpdateRevision {
 		return true
 	}
