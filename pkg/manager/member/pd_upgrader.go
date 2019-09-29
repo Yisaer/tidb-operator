@@ -77,6 +77,7 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 		// 检查是否已经是最新状态
 		if revision == tc.Status.PD.StatefulSet.UpdateRevision {
 			if member, exist := tc.Status.PD.Members[podName]; !exist || !member.Health {
+				// 不是最新状态时会返回error
 				return controller.RequeueErrorf("tidbcluster: [%s/%s]'s pd upgraded pod: [%s] is not ready", ns, tcName, podName)
 			}
 			continue

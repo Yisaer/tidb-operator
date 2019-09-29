@@ -84,7 +84,7 @@ pd:
     #   memory: 8Gi
     requests:
       # cpu: 4000m
-      memory: 212Mi
+      memory: 128Mi
       storage: 1Gi
 
   ## affinity defines pd scheduling rules,it's default settings is empty.
@@ -227,7 +227,7 @@ tikv:
     #   storage: 300Gi # We can set capacity here.
     requests:
       # cpu: 12000m
-      # memory: 24Gi
+      memory: 128Mi
       storage: 10Gi
 
   ## affinity defines tikv scheduling rules,affinity default settings is empty.

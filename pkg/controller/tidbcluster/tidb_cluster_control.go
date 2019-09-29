@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/manager"
 	"github.com/pingcap/tidb-operator/pkg/manager/member"
+	"github.com/prometheus/common/log"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	errorutils "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
@@ -115,6 +116,7 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - scale out/in the pd cluster
 	//   - failover the pd cluster
 	if err := tcc.pdMemberManager.Sync(tc); err != nil {
+		log.Error("pd control error = " + err.Error())
 		return err
 	}
 
