@@ -196,7 +196,7 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 
 	oldPDSet := oldPDSetTmp.DeepCopy()
 
-	// 同步状态
+	// 将PD信息同步到 TidbCluster Status
 	if err := pmm.syncTidbClusterStatus(tc, oldPDSet); err != nil {
 		glog.Errorf("failed to sync TidbCluster: [%s/%s]'s status, error: %v", ns, tcName, err)
 	}
@@ -217,6 +217,7 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 		}
 	}
 
+	// 扩容，缩容
 	if *newPDSet.Spec.Replicas > *oldPDSet.Spec.Replicas {
 		if err := pmm.pdScaler.ScaleOut(tc, oldPDSet, newPDSet); err != nil {
 			return err
@@ -229,9 +230,11 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 	}
 
 	if pmm.autoFailover {
+		//当PD所有节点都正常，并且TC的PD状态未更新时，更新状态为健康
 		if tc.PDAllPodsStarted() && tc.PDAllMembersReady() && tc.Status.PD.FailureMembers != nil {
 			pmm.pdFailover.Recover(tc)
 		} else if tc.PDAllPodsStarted() && !tc.PDAllMembersReady() || tc.PDAutoFailovering() {
+			// 并非所有节点就绪，或者确定有Failover时
 			if err := pmm.pdFailover.Failover(tc); err != nil {
 				return err
 			}

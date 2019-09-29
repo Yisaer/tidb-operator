@@ -151,6 +151,7 @@ func (pf *pdFailover) tryToDeleteAFailureMember(tc *v1alpha1.TidbCluster) error 
 	var failureMember *v1alpha1.PDFailureMember
 	var failurePodName string
 
+	// 获取failureMember中的POD信息,只获取一个即可
 	for podName, pdMember := range tc.Status.PD.FailureMembers {
 		if !pdMember.MemberDeleted {
 			failureMember = &pdMember
@@ -162,11 +163,13 @@ func (pf *pdFailover) tryToDeleteAFailureMember(tc *v1alpha1.TidbCluster) error 
 		return nil
 	}
 
+	// 获取到PD集群中的 memberID
 	memberID, err := strconv.ParseUint(failureMember.MemberID, 10, 64)
 	if err != nil {
 		return err
 	}
 	// invoke deleteMember api to delete a member from the pd cluster
+	//
 	err = controller.GetPDClient(pf.pdControl, tc).DeleteMemberByID(memberID)
 	if err != nil {
 		glog.Errorf("pd failover: failed to delete member: %d, %v", memberID, err)
@@ -193,12 +196,14 @@ func (pf *pdFailover) tryToDeleteAFailureMember(tc *v1alpha1.TidbCluster) error 
 		return err
 	}
 
+	// 删除POD
 	if pod != nil && pod.DeletionTimestamp == nil {
 		err := pf.podControl.DeletePod(tc, pod)
 		if err != nil {
 			return err
 		}
 	}
+	// 删除PVC
 	if pvc != nil && pvc.DeletionTimestamp == nil && pvc.GetUID() == failureMember.PVCUID {
 		err = pf.pvcControl.DeletePVC(tc, pvc)
 		if err != nil {
@@ -207,7 +212,7 @@ func (pf *pdFailover) tryToDeleteAFailureMember(tc *v1alpha1.TidbCluster) error 
 		}
 		glog.Infof("pd failover: pvc: %s/%s successfully", ns, pvcName)
 	}
-
+	// 标记为已经删除
 	setMemberDeleted(tc, failurePodName)
 	return nil
 }

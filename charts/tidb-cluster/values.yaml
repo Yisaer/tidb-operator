@@ -67,7 +67,7 @@ pd:
     [replication]
     location-labels = ["region", "zone", "rack", "host"]
 
-  replicas: 4
+  replicas: 3
   image: pingcap/pd:v3.0.1
   # storageClassName is a StorageClass provides a way for administrators to describe the "classes" of storage they offer.
   # different classes might map to quality-of-service levels, or to backup policies,

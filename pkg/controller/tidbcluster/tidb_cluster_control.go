@@ -81,7 +81,7 @@ func (tcc *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster
 		return errorutils.NewAggregate(errs)
 	}
 
-	// 更新tidbcluster api
+	// 更新tidbcluster status
 	if _, err := tcc.tcControl.UpdateTidbCluster(tc.DeepCopy(), &tc.Status, oldStatus); err != nil {
 		errs = append(errs, err)
 	}
