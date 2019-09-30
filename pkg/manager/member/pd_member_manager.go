@@ -174,6 +174,7 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
+	// 构造对应的statefulSet
 	newPDSet, err := pmm.getNewPDSetForTidbCluster(tc)
 	if err != nil {
 		return err
