@@ -16,6 +16,8 @@ package tidbcluster
 import (
 	"fmt"
 	"log"
+	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/golang/glog"
@@ -227,6 +229,9 @@ func (tcc *Controller) Run(workers int, stopCh <-chan struct{}) {
 	glog.Info("Starting tidbcluster controller")
 	defer glog.Info("Shutting down tidbcluster controller")
 
+	log.Println("start Run, goroutine num = " + strconv.Itoa(runtime.NumGoroutine()))
+
+	//同时只有workers个数量的goroutine在调和
 	for i := 0; i < workers; i++ {
 		go wait.Until(tcc.worker, time.Second, stopCh)
 	}
@@ -243,9 +248,11 @@ func (tcc *Controller) worker() {
 
 // processNextWorkItem dequeues items, processes them, and marks them done. It enforces that the syncHandler is never
 // invoked concurrently with the same key.
+// 每次调和都会从一个限速队列中获取元素，而且由于限速队列的Get方法带锁，所以不会同时操作同一个实例
 func (tcc *Controller) processNextWorkItem() bool {
 	key, quit := tcc.queue.Get()
 	if quit {
+		log.Println("For now processWorkItem quit")
 		return false
 	}
 	defer tcc.queue.Done(key)
@@ -284,7 +291,7 @@ func (tcc *Controller) sync(key string) error {
 	if err != nil {
 		return err
 	}
-	log.Println("get tc " + tc.Status.ClusterID )
+	log.Println("get tc " + tc.Status.ClusterID)
 	return tcc.syncTidbCluster(tc.DeepCopy())
 }
 

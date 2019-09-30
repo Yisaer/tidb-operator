@@ -9,7 +9,7 @@ rbac:
   create: true
 
 # operatorImage is TiDB Operator image
-operatorImage: yisa/operator:0.1.7
+operatorImage: yisa/operator:0.1.9
 imagePullPolicy: IfNotPresent
 
 defaultStorageClassName: hostpath

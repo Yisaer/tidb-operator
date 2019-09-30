@@ -179,6 +179,7 @@ func main() {
 		go wait.Forever(func() { backupController.Run(workers, ctx.Done()) }, waitDuration)
 		go wait.Forever(func() { restoreController.Run(workers, ctx.Done()) }, waitDuration)
 		go wait.Forever(func() { bsController.Run(workers, ctx.Done()) }, waitDuration)
+		// 这里的Run函数会被ctx.Done()所阻塞而长期运行，所以整个进程周期内Run方法只会被调用一次
 		wait.Forever(func() { tcController.Run(workers, ctx.Done()) }, waitDuration)
 	}
 	onStopped := func() {
