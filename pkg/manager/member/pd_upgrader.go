@@ -15,7 +15,6 @@ package member
 
 import (
 	"fmt"
-
 	"github.com/golang/glog"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap.com/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
@@ -77,12 +76,12 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 		// 检查是否已经是最新状态
 		if revision == tc.Status.PD.StatefulSet.UpdateRevision {
 			if member, exist := tc.Status.PD.Members[podName]; !exist || !member.Health {
-				// 不是最新状态时会返回error
+				//未就绪时会返回error
 				return controller.RequeueErrorf("tidbcluster: [%s/%s]'s pd upgraded pod: [%s] is not ready", ns, tcName, podName)
 			}
 			continue
 		}
-
+		// 迁移leader，并将当前为leader的POD的ordinal设置为partition
 		return pu.upgradePDPod(tc, i, newSet)
 	}
 
