@@ -199,7 +199,7 @@ func tikvPodName(tcName string, ordinal int32) string {
 	return fmt.Sprintf("%s-%d", controller.TiKVMemberName(tcName), ordinal)
 }
 
-func pdPodName(tcName string, ordinal int32) string {
+func PdPodName(tcName string, ordinal int32) string {
 	return fmt.Sprintf("%s-%d", controller.PDMemberName(tcName), ordinal)
 }
 

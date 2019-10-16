@@ -15,6 +15,7 @@ package member
 
 import (
 	"fmt"
+	"github.com/prometheus/common/log"
 	"strconv"
 
 	"github.com/golang/glog"
@@ -33,6 +34,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/listers/apps/v1beta1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+)
+
+var (
+	Process = 0
 )
 
 type pdMemberManager struct {
@@ -171,14 +176,19 @@ func (pmm *pdMemberManager) syncPDHeadlessServiceForTidbCluster(tc *v1alpha1.Tid
 }
 
 func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbCluster) error {
+
+	Process = Process + 1
+
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
+	// 构建出目标sts
 	newPDSet, err := pmm.getNewPDSetForTidbCluster(tc)
 	if err != nil {
 		return err
 	}
 
+	// 获取老的Sts
 	oldPDSetTmp, err := pmm.setLister.StatefulSets(ns).Get(controller.PDMemberName(tcName))
 	if err != nil && !errors.IsNotFound(err) {
 		return err
@@ -197,10 +207,12 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 
 	oldPDSet := oldPDSetTmp.DeepCopy()
 
+	// 每次更新先sync status
 	if err := pmm.syncTidbClusterStatus(tc, oldPDSet); err != nil {
 		glog.Errorf("failed to sync TidbCluster: [%s/%s]'s status, error: %v", ns, tcName, err)
 	}
 
+	// 是否强制更新
 	if !tc.Status.PD.Synced {
 		force := needForceUpgrade(tc)
 		if force {
@@ -211,12 +223,15 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 		}
 	}
 
+	log.Info("start to check Upgrade PD STS , Process = " + strconv.Itoa(Process))
 	if !templateEqual(newPDSet.Spec.Template, oldPDSet.Spec.Template) || tc.Status.PD.Phase == v1alpha1.UpgradePhase {
+		log.Info("necessary to upgrade PD STS, Process = " + strconv.Itoa(Process))
 		if err := pmm.pdUpgrader.Upgrade(tc, oldPDSet, newPDSet); err != nil {
 			return err
 		}
 	}
 
+	log.Info("decide to upgrade PD STS, Process = " + strconv.Itoa(Process))
 	if *newPDSet.Spec.Replicas > *oldPDSet.Spec.Replicas {
 		if err := pmm.pdScaler.ScaleOut(tc, oldPDSet, newPDSet); err != nil {
 			return err

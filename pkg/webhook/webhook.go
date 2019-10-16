@@ -14,6 +14,7 @@
 package webhook
 
 import (
+	"github.com/pingcap/tidb-operator/pkg/pdapi"
 	"net/http"
 
 	"github.com/golang/glog"
@@ -30,6 +31,8 @@ type WebhookServer struct {
 	Cli versioned.Interface
 	// http server
 	Server *http.Server
+	// pd-Control
+	pdControl pdapi.PDControlInterface
 }
 
 func NewWebHookServer(kubecli kubernetes.Interface, cli versioned.Interface, certFile string, keyFile string) *WebhookServer {
@@ -47,10 +50,13 @@ func NewWebHookServer(kubecli kubernetes.Interface, cli versioned.Interface, cer
 		TLSConfig: sCert,
 	}
 
+	pdControl := pdapi.NewDefaultPDControl()
+
 	return &WebhookServer{
-		KubeCli: kubecli,
-		Cli:     cli,
-		Server:  server,
+		KubeCli:   kubecli,
+		Cli:       cli,
+		Server:    server,
+		pdControl: pdControl,
 	}
 }
 

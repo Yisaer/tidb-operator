@@ -55,6 +55,10 @@ const (
 	NormalPhase MemberPhase = "Normal"
 	// UpgradePhase represents the upgrade state of TiDB cluster.
 	UpgradePhase MemberPhase = "Upgrade"
+	// ScaleInPhase represents the scale-in state out TiDB cluster
+	ScaleInPhase MemberPhase = "ScaleIn"
+	// ScaleOutPhase represents the scale-out state out TiDB cluster
+	ScaleOutPhase MemberPhase = "ScaleOut"
 )
 
 // +genclient
