@@ -54,6 +54,11 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 		return fmt.Errorf("tidbcluster: [%s/%s]'s pd status sync failed,can not to be upgraded", ns, tcName)
 	}
 
+	// 初始状态 PD Phase为Normal，oldSet是原来的定义 newSet是新的定义 两者不同
+	// 第一次调和 PD Phase 修改为 Upgrade Phase,因为两个模板不同走进函数，然后发现模板不同,return nil
+	// 第一次调和结果 PD Phase修改为Upgrade,老的STS模板被修改 但是由于partition的关系不会更新任何一个POD partition = replicas
+	// 进入第二次调和 Phase为 Upgrade Phase，模板相同，所以进入Upgrader逻辑
+	// 修改 Partition
 	tc.Status.PD.Phase = v1alpha1.UpgradePhase
 	if !templateEqual(newSet.Spec.Template, oldSet.Spec.Template) {
 		log.Info("graceful Upgrade template Equal false,Process = " + strconv.Itoa(Process))

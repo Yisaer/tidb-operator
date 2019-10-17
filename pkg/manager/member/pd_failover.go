@@ -104,6 +104,7 @@ func (pf *pdFailover) Recover(tc *v1alpha1.TidbCluster) {
 	glog.Infof("pd failover: clearing pd failoverMembers, %s/%s", tc.GetNamespace(), tc.GetName())
 }
 
+// 判断PD是否需要被标记为FailureMember
 func (pf *pdFailover) tryToMarkAPeerAsFailure(tc *v1alpha1.TidbCluster) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()

@@ -207,7 +207,8 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 
 	oldPDSet := oldPDSetTmp.DeepCopy()
 
-	// 每次更新先sync status
+	// 每次更新先sync status, 同步Synced状态代表PD集群是否可用
+	// 同时也会更新PD Phase状态，由PD Phase来决定是否已经升级完了
 	if err := pmm.syncTidbClusterStatus(tc, oldPDSet); err != nil {
 		glog.Errorf("failed to sync TidbCluster: [%s/%s]'s status, error: %v", ns, tcName, err)
 	}
@@ -278,6 +279,7 @@ func (pmm *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set 
 
 	tc.Status.PD.StatefulSet = &set.Status
 
+	// 判断Upgrade 环节是否已经结束
 	upgrading, err := pmm.pdStatefulSetIsUpgrading(set, tc)
 	if err != nil {
 		return err

@@ -1,15 +1,39 @@
 package pod
 
 import (
+	"github.com/pingcap/tidb-operator/pkg/pdapi"
+	"github.com/pingcap/tidb-operator/pkg/webhook/util"
+)
+
+// 1. sync tidb cluster status
+// 2. 判断 pd 是否符合预期
+// 3. 发现与预期不符合
+// 4. 进入PD upgrader 逻辑
+// upgrader
+// 2.  为True 进入upgrader逻辑
+
+//  PD 模板不同，而Phase为Normal。代表开始进入修改状态
+//  PD Phase修改为 EditAble( Upgrading / Scaling) ，退出调和
+
+//  再次进入调和，发现PD Phase是Upgrading 进入 Upgrader
+//  PD模板不同，而PD Phase是Upgrading 代表允许开始修改状态
+//  修改PD模板
+
+//upgrader
+// 1. template相同 version不同
+// 2. 根据POD数量版本来设置revision 单步设置
+
+// 进入调和 PD Phase变成 Normal
+
+
+import (
 	"errors"
 	"github.com/golang/glog"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap.com/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	pdutil "github.com/pingcap/tidb-operator/pkg/manager/member"
-	"github.com/pingcap/tidb-operator/pkg/pdapi"
 	utils "github.com/pingcap/tidb-operator/pkg/util"
-	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +84,7 @@ func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 
 	l := label.Label(pod.Labels)
 
-	if !(l.IsPD()) {
+	if !(l.IsPD() || l.IsTiKV() || l.IsTiDB()) {
 		// If it is not pod of pd
 		return util.ARSuccess()
 	}
