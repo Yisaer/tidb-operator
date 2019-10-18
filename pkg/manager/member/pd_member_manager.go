@@ -178,22 +178,27 @@ func (pmm *pdMemberManager) syncPDHeadlessServiceForTidbCluster(tc *v1alpha1.Tid
 func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbCluster) error {
 
 	Process = Process + 1
-
+	sProcess := strconv.Itoa(Process)
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
 	// 构建出目标sts
 	newPDSet, err := pmm.getNewPDSetForTidbCluster(tc)
+	log.Info("Process = " + sProcess + ",build newSet")
 	if err != nil {
+		log.Info("Process = " + sProcess + ",build newSet failed")
 		return err
 	}
 
 	// 获取老的Sts
 	oldPDSetTmp, err := pmm.setLister.StatefulSets(ns).Get(controller.PDMemberName(tcName))
+	log.Info("Process = " + sProcess + ",get oldSet")
 	if err != nil && !errors.IsNotFound(err) {
+		log.Info("Process = " + sProcess + ",get oldSet failed")
 		return err
 	}
 	if errors.IsNotFound(err) {
+		log.Info("Process = " + sProcess + ",get oldSet not found")
 		err = SetLastAppliedConfigAnnotation(newPDSet)
 		if err != nil {
 			return err
@@ -201,6 +206,7 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 		if err := pmm.setControl.CreateStatefulSet(tc, newPDSet); err != nil {
 			return err
 		}
+		log.Info("Process = " + sProcess + "create PD set")
 		tc.Status.PD.StatefulSet = &apps.StatefulSetStatus{}
 		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName)
 	}
