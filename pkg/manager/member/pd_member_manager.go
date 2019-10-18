@@ -254,6 +254,14 @@ func (pmm *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClu
 		}
 	}
 
+	oldMem := oldPDSet.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String()
+	newMem := newPDSet.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String()
+
+	oldPartition := strconv.FormatInt(int64(*oldPDSet.Spec.UpdateStrategy.RollingUpdate.Partition), 10)
+	newPartition := strconv.FormatInt(int64(*newPDSet.Spec.UpdateStrategy.RollingUpdate.Partition), 10)
+
+	log.Info("Process = " + strconv.Itoa(Process) + ",newMem = " + newMem + "，newPartition = " + newPartition + ",oldMem = " + oldMem + ",oldPartition = " + oldPartition)
+
 	return pmm.updateStatefulSet(tc, newPDSet, oldPDSet)
 }
 func (pmm *pdMemberManager) updateStatefulSet(tc *v1alpha1.TidbCluster, newPDSet, oldPDSet *apps.StatefulSet) error {
