@@ -16,6 +16,7 @@ package route
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pingcap/tidb-operator/pkg/webhook/pod"
 	"io/ioutil"
 	"net/http"
 
@@ -94,4 +95,8 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 
 func ServeStatefulSets(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, statefulset.AdmitStatefulSets)
+}
+
+func ServePods(w http.ResponseWriter, r *http.Request) {
+	serve(w, r, pod.AdmitPods)
 }

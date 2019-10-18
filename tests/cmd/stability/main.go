@@ -180,8 +180,6 @@ func run() {
 
 		// configuration change
 		for _, cluster := range clusters {
-			cluster.EnableConfigMapRollout = true
-
 			// bad conf
 			cluster.TiDBPreStartScript = strconv.Quote("exit 1")
 			cluster.TiKVPreStartScript = strconv.Quote("exit 1")
@@ -190,12 +188,12 @@ func run() {
 			time.Sleep(30 * time.Second)
 			oa.CheckTidbClustersAvailableOrDie([]*tests.TidbClusterConfig{cluster})
 			// rollback conf
-			cluster.PDPreStartScript = strconv.Quote("# noop")
-			cluster.TiKVPreStartScript = strconv.Quote("# noop")
-			cluster.TiDBPreStartScript = strconv.Quote("# noop")
+			cluster.PDPreStartScript = strconv.Quote("")
+			cluster.TiKVPreStartScript = strconv.Quote("")
+			cluster.TiDBPreStartScript = strconv.Quote("")
 			oa.UpgradeTidbClusterOrDie(cluster)
 			// wait upgrade complete
-			oa.CheckUpgradeOrDie(ctx, cluster)
+			oa.CheckUpgradeCompleteOrDie(cluster)
 			oa.CheckTidbClusterStatusOrDie(cluster)
 
 			cluster.UpdatePdMaxReplicas(cfg.PDMaxReplicas).
@@ -436,9 +434,10 @@ func newTidbClusterConfig(ns, clusterName string) *tests.TidbClusterConfig {
 			"binlog.drainer.workerCount": "1024",
 			"binlog.drainer.txnBatch":    "512",
 		},
-		Monitor:          true,
-		BlockWriteConfig: cfg.BlockWriter,
-		TopologyKey:      topologyKey,
-		ClusterVersion:   tidbVersion,
+		Monitor:                true,
+		BlockWriteConfig:       cfg.BlockWriter,
+		TopologyKey:            topologyKey,
+		ClusterVersion:         tidbVersion,
+		EnableConfigMapRollout: true,
 	}
 }

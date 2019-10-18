@@ -15,13 +15,14 @@ package member
 
 import (
 	"fmt"
+	"github.com/pingcap/tidb-operator/pkg/util"
 
 	"github.com/golang/glog"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap.com/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/pkg/pdapi"
-	apps "k8s.io/api/apps/v1beta1"
+	apps "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	corelisters "k8s.io/client-go/listers/core/v1"
 )
@@ -96,7 +97,7 @@ func decreaseReplicas(newSet *apps.StatefulSet, oldSet *apps.StatefulSet) {
 }
 
 func ordinalPVCName(memberType v1alpha1.MemberType, setName string, ordinal int32) string {
-	return fmt.Sprintf("%s-%s-%d", memberType, setName, ordinal)
+	return util.OrdinalPVCName(memberType, setName, ordinal)
 }
 
 func ordinalPodName(memberType v1alpha1.MemberType, tcName string, ordinal int32) string {

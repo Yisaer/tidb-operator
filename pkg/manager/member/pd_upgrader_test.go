@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/pkg/pdapi"
-	apps "k8s.io/api/apps/v1beta1"
+	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -181,28 +181,12 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			name: "skip to wait all members health",
 			changeFn: func(tc *v1alpha1.TidbCluster) {
 				tc.Status.PD.Synced = true
-				tc.Status.PD.Members[pdPodName(upgradeTcName, 2)] = v1alpha1.PDMember{Name: pdPodName(upgradeTcName, 2), Health: false}
+				tc.Status.PD.Members[PdPodName(upgradeTcName, 2)] = v1alpha1.PDMember{Name: PdPodName(upgradeTcName, 2), Health: false}
 			},
 			changePods:        nil,
 			transferLeaderErr: false,
 			errExpectFn: func(g *GomegaWithT, err error) {
-				g.Expect(err.Error()).To(Equal(fmt.Sprintf("tidbcluster: [default/upgrader]'s pd upgraded pod: [%s] is not ready", pdPodName(upgradeTcName, 2))))
-			},
-			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
-				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(2)))
-			},
-		},
-		{
-			name: "transfer leader",
-			changeFn: func(tc *v1alpha1.TidbCluster) {
-				tc.Status.PD.Synced = true
-				tc.Status.PD.Leader = v1alpha1.PDMember{Name: pdPodName(upgradeTcName, 1), Health: true}
-			},
-			changePods:        nil,
-			transferLeaderErr: false,
-			errExpectFn: func(g *GomegaWithT, err error) {
-				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(Equal(fmt.Sprintf("tidbcluster: [default/upgrader]'s pd upgraded pod: [%s] is not ready", PdPodName(upgradeTcName, 2))))
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
@@ -222,22 +206,6 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.NormalPhase))
 				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(3)))
-			},
-		},
-		{
-			name: "error when transfer leader",
-			changeFn: func(tc *v1alpha1.TidbCluster) {
-				tc.Status.PD.Synced = true
-				tc.Status.PD.Leader = v1alpha1.PDMember{Name: pdPodName(upgradeTcName, 1), Health: true}
-			},
-			changePods:        nil,
-			transferLeaderErr: true,
-			errExpectFn: func(g *GomegaWithT, err error) {
-				g.Expect(err).To(HaveOccurred())
-			},
-			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
-				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(2)))
 			},
 		},
 	}
@@ -295,9 +263,9 @@ func newStatefulSetForPDUpgrader() *apps.StatefulSet {
 }
 
 func newTidbClusterForPDUpgrader() *v1alpha1.TidbCluster {
-	podName0 := pdPodName(upgradeTcName, 0)
-	podName1 := pdPodName(upgradeTcName, 1)
-	podName2 := pdPodName(upgradeTcName, 2)
+	podName0 := PdPodName(upgradeTcName, 0)
+	podName1 := PdPodName(upgradeTcName, 1)
+	podName2 := PdPodName(upgradeTcName, 2)
 	return &v1alpha1.TidbCluster{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "TidbCluster",
@@ -349,7 +317,7 @@ func getPods() []*corev1.Pod {
 		{
 			TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      pdPodName(upgradeTcName, 0),
+				Name:      PdPodName(upgradeTcName, 0),
 				Namespace: corev1.NamespaceDefault,
 				Labels:    lc,
 			},
@@ -357,7 +325,7 @@ func getPods() []*corev1.Pod {
 		{
 			TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      pdPodName(upgradeTcName, 1),
+				Name:      PdPodName(upgradeTcName, 1),
 				Namespace: corev1.NamespaceDefault,
 				Labels:    lc,
 			},
@@ -365,7 +333,7 @@ func getPods() []*corev1.Pod {
 		{
 			TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      pdPodName(upgradeTcName, 2),
+				Name:      PdPodName(upgradeTcName, 2),
 				Namespace: corev1.NamespaceDefault,
 				Labels:    lu,
 			},
