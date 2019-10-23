@@ -227,7 +227,7 @@ tikv:
     #   storage: 300Gi # We can set capacity here.
     requests:
       # cpu: 12000m
-      memory: 128Mi
+      memory: 138Mi
       storage: 10Gi
 
   ## affinity defines tikv scheduling rules,affinity default settings is empty.
