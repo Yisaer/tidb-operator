@@ -21,8 +21,11 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	core "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"strconv"
 	"strings"
 )
@@ -48,6 +51,16 @@ func init() {
 }
 
 func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return util.ARFail(err)
+	}
+
+	kubeCli, err = kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return util.ARFail(err)
+	}
 
 	name := ar.Request.Name
 	namespace := ar.Request.Namespace
@@ -84,6 +97,10 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	if err != nil {
 		return util.ARFail(err)
 	}
+	err = createService(name, namespace)
+	if err != nil {
+		return util.ARFail(err)
+	}
 	return &v1beta1.AdmissionResponse{
 		Allowed: true,
 		Patch:   patchBytes,
@@ -92,6 +109,40 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			return &pt
 		}(),
 	}
+}
+
+func createService(name, namespace string) error {
+	svc := generateService(name)
+	_, err := kubeCli.CoreV1().Services(namespace).Create(svc)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func generateService(name string) *core.Service {
+	pdLabel := map[string]string{
+		"statefulset.kubernetes.io/pod-name": name,
+	}
+	svc := &core.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: pdLabel,
+		},
+		Spec: core.ServiceSpec{
+			Type: core.ServiceTypeNodePort,
+			Ports: []core.ServicePort{
+				{
+					Name:       "tikv",
+					Port:       20160,
+					TargetPort: intstr.FromInt(20160),
+					Protocol:   core.ProtocolTCP,
+				},
+			},
+			Selector: pdLabel,
+		},
+	}
+	return svc
 }
 
 // create mutation patch
@@ -106,7 +157,7 @@ func editPod(name, namespace string) (patch patchOperation) {
 	// edit container commands
 	commands := generatePDCommand(name, namespace)
 	patch = patchOperation{
-		Op:    "add",
+		Op:    "replace",
 		Path:  "/spec/containers/0/command",
 		Value: commands,
 	}

@@ -61,3 +61,5 @@ Contributions are welcome and greatly appreciated. See [CONTRIBUTING.md](./docs/
 ## License
 
 TiDB is under the Apache 2.0 license. See the [LICENSE](./LICENSE) file for details.
+
+kubectl port-forward -n test svc/demo-pd 2379:2379 &>/tmp/portforward-pd.log 
