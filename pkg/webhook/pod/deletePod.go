@@ -1,6 +1,7 @@
 package pod
 
 import (
+	"github.com/golang/glog"
 	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,5 +31,6 @@ func AdmitDeletePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 		return util.ARFail(err)
 	}
 
+	glog.Infof("mixed pod[%s/%s] admit to delete", namespace, name)
 	return util.ARSuccess()
 }

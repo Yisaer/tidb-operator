@@ -58,6 +58,11 @@ spec:
       labels:
         app.kubernetes.io/instance: test
     spec:
+      initContainers:
+        - name: init-myservice
+          image: busybox:1.26.2
+          imagePullPolicy: IfNotPresent
+          command: ['sh', '-c', 'sleep 10']
       containers:
         - command:
             - /pd-server
