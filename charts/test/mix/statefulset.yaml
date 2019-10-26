@@ -58,11 +58,11 @@ spec:
       labels:
         app.kubernetes.io/instance: test
     spec:
-      initContainers:
-        - name: init-myservice
-          image: busybox:1.26.2
-          imagePullPolicy: IfNotPresent
-          command: ['sh', '-c', 'sleep 10']
+#      initContainers:
+#        - name: init-myservice
+#          image: busybox:1.26.2
+#          imagePullPolicy: IfNotPresent
+#          command: ['sh', '-c', 'sleep 10']
       containers:
         - command:
             - /pd-server
@@ -195,7 +195,7 @@ spec:
         resources:
           requests:
             storage: 1Gi
-        storageClassName: hostpath
+        storageClassName: standard
         volumeMode: Filesystem
     - metadata:
         name: tikv-storage
@@ -205,7 +205,7 @@ spec:
         resources:
           requests:
             storage: 5Gi
-        storageClassName: hostpath
+        storageClassName: standard
         volumeMode: Filesystem
 ---
 
@@ -214,7 +214,7 @@ spec:
 #kind: StatefulSet
 #metadata:
 #  annotations:
-#    pingcap.com/last-applied-configuration: '{"replicas":1,"selector":{"matchLabels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"}},"template":{"metadata":{"creationTimestamp":null,"labels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"},"annotations":{"prometheus.io/path":"/metrics","prometheus.io/port":"20180","prometheus.io/scrape":"true"}},"spec":{"volumes":[{"name":"annotations","downwardAPI":{"items":[{"path":"annotations","fieldRef":{"fieldPath":"metadata.annotations"}}]}},{"name":"config","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"config-file","path":"tikv.toml"}]}},{"name":"startup-script","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"startup-script","path":"tikv_start_script.sh"}]}}],"containers":[{"name":"tikv","image":"pingcap/tikv:v3.0.4","command":["/bin/sh","/usr/local/bin/tikv_start_script.sh"],"ports":[{"name":"server","containerPort":20160,"protocol":"TCP"}],"env":[{"name":"NAMESPACE","valueFrom":{"fieldRef":{"fieldPath":"metadata.namespace"}}},{"name":"POD_NAME","valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}},{"name":"CLUSTER_NAME","value":"demo"},{"name":"HEADLESS_SERVICE_NAME","value":"demo-tikv-peer"},{"name":"CAPACITY","value":"0"},{"name":"TZ","value":"UTC"}],"resources":{},"volumeMounts":[{"name":"annotations","readOnly":true,"mountPath":"/etc/podinfo"},{"name":"tikv","mountPath":"/var/lib/tikv"},{"name":"config","readOnly":true,"mountPath":"/etc/tikv"},{"name":"startup-script","readOnly":true,"mountPath":"/usr/local/bin"}],"imagePullPolicy":"IfNotPresent","securityContext":{"privileged":false}}],"restartPolicy":"Always","dnsPolicy":"ClusterFirst","securityContext":{},"affinity":{},"schedulerName":"tidb-scheduler"}},"volumeClaimTemplates":[{"metadata":{"name":"tikv","creationTimestamp":null},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"10Gi"}},"storageClassName":"hostpath","dataSource":null},"status":{}}],"serviceName":"demo-tikv-peer","podManagementPolicy":"Parallel","updateStrategy":{"type":"RollingUpdate","rollingUpdate":{"partition":1}}}'
+#    pingcap.com/last-applied-configuration: '{"replicas":1,"selector":{"matchLabels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"}},"template":{"metadata":{"creationTimestamp":null,"labels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"},"annotations":{"prometheus.io/path":"/metrics","prometheus.io/port":"20180","prometheus.io/scrape":"true"}},"spec":{"volumes":[{"name":"annotations","downwardAPI":{"items":[{"path":"annotations","fieldRef":{"fieldPath":"metadata.annotations"}}]}},{"name":"config","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"config-file","path":"tikv.toml"}]}},{"name":"startup-script","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"startup-script","path":"tikv_start_script.sh"}]}}],"containers":[{"name":"tikv","image":"pingcap/tikv:v3.0.4","command":["/bin/sh","/usr/local/bin/tikv_start_script.sh"],"ports":[{"name":"server","containerPort":20160,"protocol":"TCP"}],"env":[{"name":"NAMESPACE","valueFrom":{"fieldRef":{"fieldPath":"metadata.namespace"}}},{"name":"POD_NAME","valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}},{"name":"CLUSTER_NAME","value":"demo"},{"name":"HEADLESS_SERVICE_NAME","value":"demo-tikv-peer"},{"name":"CAPACITY","value":"0"},{"name":"TZ","value":"UTC"}],"resources":{},"volumeMounts":[{"name":"annotations","readOnly":true,"mountPath":"/etc/podinfo"},{"name":"tikv","mountPath":"/var/lib/tikv"},{"name":"config","readOnly":true,"mountPath":"/etc/tikv"},{"name":"startup-script","readOnly":true,"mountPath":"/usr/local/bin"}],"imagePullPolicy":"IfNotPresent","securityContext":{"privileged":false}}],"restartPolicy":"Always","dnsPolicy":"ClusterFirst","securityContext":{},"affinity":{},"schedulerName":"tidb-scheduler"}},"volumeClaimTemplates":[{"metadata":{"name":"tikv","creationTimestamp":null},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"10Gi"}},"storageClassName":"standard","dataSource":null},"status":{}}],"serviceName":"demo-tikv-peer","podManagementPolicy":"Parallel","updateStrategy":{"type":"RollingUpdate","rollingUpdate":{"partition":1}}}'
 #  creationTimestamp: "2019-10-26T06:58:34Z"
 #  generation: 1
 #  labels:
@@ -350,7 +350,7 @@ spec:
 #        resources:
 #          requests:
 #            storage: 10Gi
-#        storageClassName: hostpath
+#        storageClassName: standard
 #        volumeMode: Filesystem
 #      status:
 #        phase: Pending

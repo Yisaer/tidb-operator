@@ -67,8 +67,8 @@ func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	switch operation {
 	case v1beta1.Create:
 		return AdmitCreatePod(ar)
-	case v1beta1.Delete:
-		return AdmitDeletePod(ar)
+	//case v1beta1.Delete:
+	//	return AdmitDeletePod(ar)
 	default:
 		return util.ARSuccess()
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"strconv"
@@ -51,10 +52,18 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 }
 
 func createService(name, namespace string) error {
-	svc := generateService(name)
-	_, err := kubeCli.CoreV1().Services(namespace).Create(svc)
+	_, err := kubeCli.CoreV1().Services(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		if errors.IsNotFound(err) {
+			svc := generateService(name)
+			_, err := kubeCli.CoreV1().Services(namespace).Create(svc)
+			if err != nil {
+				return err
+			}
+			return nil
+		} else {
+			return err
+		}
 	}
 	return nil
 }
@@ -88,8 +97,31 @@ func generateService(name string) *core.Service {
 func createPatch(name, namespace string) ([]byte, error) {
 	var patch []patchOperation
 	patch = append(patch, editPod(name, namespace))
-
+	ordinal := getPodOrdinal(name)
+	if ordinal > 0 {
+		patch = append(patch, addInitContainer())
+	}
 	return json.Marshal(patch)
+}
+
+func addInitContainer() (patch patchOperation) {
+	var containers []core.Container
+	command := []string{
+		"sh", "-c", "sleep 30",
+	}
+	container := core.Container{
+		Name:            "init",
+		Image:           "busybox:1.26.2",
+		ImagePullPolicy: "IfNotPresent",
+		Command:         command,
+	}
+	containers = append(containers, container)
+	patch = patchOperation{
+		Op:    "replace",
+		Path:  "/spec/initContainers",
+		Value: containers,
+	}
+	return patch
 }
 
 func editPod(name, namespace string) (patch patchOperation) {
@@ -140,7 +172,7 @@ func generateJoinAibo(name, namespace string) (aibo string) {
 			aibo = aibo + ","
 		}
 		podName := generatePodName(name, int32(i))
-		aibo = aibo + fmt.Sprintf("http://%s.demo-peer.%s.svc:2380", podName, namespace)
+		aibo = aibo + fmt.Sprintf("http://%s.demo-peer.%s.svc:2379", podName, namespace)
 	}
 	return aibo
 }
