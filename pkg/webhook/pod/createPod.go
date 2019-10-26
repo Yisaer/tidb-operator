@@ -39,6 +39,7 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	if err != nil {
 		return util.ARFail(err)
 	}
+	glog.Infof("Admit to create mixed pod:[%s/%s]", namespace, name)
 	return &v1beta1.AdmissionResponse{
 		Allowed: true,
 		Patch:   patchBytes,
