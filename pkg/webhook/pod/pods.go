@@ -76,6 +76,10 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	if !existed {
 		return util.ARSuccess()
 	}
+	if pod.Labels["app.kubernetes.io/instance"] != "test" {
+		return util.ARSuccess()
+	}
+
 	patchBytes, err := createPatch(name, namespace)
 	if err != nil {
 		return util.ARFail(err)
