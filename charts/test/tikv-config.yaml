@@ -1,0 +1,23 @@
+apiVersion: v1
+data:
+  config-file: log-level = "info"
+  startup-script: "#!/bin/sh\n\n# This script is used to start tikv containers in
+    kubernetes cluster\n\n# Use DownwardAPIVolumeFiles to store informations of the
+    cluster:\n# https://kubernetes.io/docs/tasks/inject-data-application/downward-api-volume-expose-pod-information/#the-downward-api\n#\n#
+    \  runmode=\"normal/debug\"\n#\n\nset -uo pipefail\nsleep 10\n\n\nANNOTATIONS=\"/etc/podinfo/annotations\"\n\nif
+    [[ ! -f \"${ANNOTATIONS}\" ]]\nthen\n    echo \"${ANNOTATIONS} does't exist, exiting.\"\n
+    \   exit 1\nfi\nsource ${ANNOTATIONS} 2>/dev/null\n\nrunmode=${runmode:-normal}\nif
+    [[ X${runmode} == Xdebug ]]\nthen\n\techo \"entering debug mode.\"\n\ttail -f
+    /dev/null\nfi\n\nSCHEME=\"http\"\n\n# Use HOSTNAME if POD_NAME is unset for backward
+    compatibility.\nPOD_NAME=${POD_NAME:-$HOSTNAME}\nARGS=\"--pd=${SCHEME}://localhost:2379
+    \\\n--advertise-addr=${POD_NAME}.${HEADLESS_SERVICE_NAME}.${NAMESPACE}.svc:20160
+    \\\n--addr=0.0.0.0:20160 \\\n--status-addr=0.0.0.0:20180 \\\n--data-dir=/var/lib/tikv
+    \\\n--capacity=${CAPACITY} \\\n--config=/etc/tikv/tikv.toml\n\"\n\necho \"starting
+    tikv-server ...\"\necho \"/tikv-server ${ARGS}\"\nexec /tikv-server ${ARGS}"
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2019-10-26T06:58:11Z"
+  labels:
+    app.kubernetes.io/instance: test
+  name: tikv-config
+  namespace: test

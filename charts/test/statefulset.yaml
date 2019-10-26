@@ -3,7 +3,7 @@ kind: Service
 metadata:
   labels:
     app.kubernetes.io/instance: test
-  name: demo
+  name: demo-pd
   namespace: test
 spec:
   ports:
@@ -26,15 +26,19 @@ metadata:
 spec:
   clusterIP: None
   ports:
-    - name: peer
+    - name: pd-peer
       port: 2380
       protocol: TCP
       targetPort: 2380
+    - name: tikv-peer
+      protocol: TCP
+      port: 20160
+      targetPort: 20160
   selector:
     app.kubernetes.io/instance: test
   type: ClusterIP
-
 ---
+
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -54,24 +58,6 @@ spec:
       labels:
         app.kubernetes.io/instance: test
     spec:
-      initContainers:
-        - name: init-myservice
-          image: busybox:1.26.2
-          imagePullPolicy: IfNotPresent
-          command: ['sh', '-c', 'sleep 10']
-          env:
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.namespace
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.name
-            - name: PEER_SERVICE_NAME
-              value: demo-peer
       containers:
         - command:
             - /pd-server
@@ -110,13 +96,59 @@ spec:
               name: annotations
               readOnly: true
             - mountPath: /etc/pd
-              name: config
+              name: pd-config
               readOnly: true
             - mountPath: /var/lib/pd
-              name: pd
+              name: pd-storage
+        - command:
+            - /bin/sh
+            - /usr/local/bin/tikv_start_script.sh
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: CLUSTER_NAME
+              value: demo
+            - name: HEADLESS_SERVICE_NAME
+              value: demo-peer
+            - name: CAPACITY
+              value: "0"
+            - name: TZ
+              value: UTC
+          image: pingcap/tikv:v3.0.4
+          imagePullPolicy: IfNotPresent
+          name: tikv
+          ports:
+            - containerPort: 20160
+              name: server
+              protocol: TCP
+          resources: {}
+          securityContext:
+            privileged: false
+            procMount: Default
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /etc/podinfo
+              name: annotations
+              readOnly: true
+            - mountPath: /var/lib/tikv
+              name: tikv-storage
+            - mountPath: /etc/tikv
+              name: tikv-config
+              readOnly: true
+            - mountPath: /usr/local/bin
+              name: tikv-startup-script
+              readOnly: true
       dnsPolicy: ClusterFirst
       restartPolicy: Always
-      schedulerName: tidb-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 30
       volumes:
@@ -134,11 +166,24 @@ spec:
               - key: config-file
                 path: pd.toml
             name: pd-config
-          name: config
+          name: pd-config
+        - configMap:
+            defaultMode: 420
+            items:
+              - key: config-file
+                path: tikv.toml
+            name: tikv-config
+          name: tikv-config
+        - configMap:
+            defaultMode: 420
+            items:
+              - key: startup-script
+                path: tikv_start_script.sh
+            name: tikv-config
+          name: tikv-startup-script
   volumeClaimTemplates:
     - metadata:
-        creationTimestamp: null
-        name: pd
+        name: pd-storage
       spec:
         accessModes:
           - ReadWriteOnce
@@ -147,4 +192,160 @@ spec:
             storage: 1Gi
         storageClassName: hostpath
         volumeMode: Filesystem
+    - metadata:
+        name: tikv-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+        storageClassName: hostpath
+        volumeMode: Filesystem
 ---
+
+
+#apiVersion: apps/v1
+#kind: StatefulSet
+#metadata:
+#  annotations:
+#    pingcap.com/last-applied-configuration: '{"replicas":1,"selector":{"matchLabels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"}},"template":{"metadata":{"creationTimestamp":null,"labels":{"app.kubernetes.io/component":"tikv","app.kubernetes.io/instance":"demo","app.kubernetes.io/managed-by":"tidb-operator","app.kubernetes.io/name":"tidb-cluster"},"annotations":{"prometheus.io/path":"/metrics","prometheus.io/port":"20180","prometheus.io/scrape":"true"}},"spec":{"volumes":[{"name":"annotations","downwardAPI":{"items":[{"path":"annotations","fieldRef":{"fieldPath":"metadata.annotations"}}]}},{"name":"config","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"config-file","path":"tikv.toml"}]}},{"name":"startup-script","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"startup-script","path":"tikv_start_script.sh"}]}}],"containers":[{"name":"tikv","image":"pingcap/tikv:v3.0.4","command":["/bin/sh","/usr/local/bin/tikv_start_script.sh"],"ports":[{"name":"server","containerPort":20160,"protocol":"TCP"}],"env":[{"name":"NAMESPACE","valueFrom":{"fieldRef":{"fieldPath":"metadata.namespace"}}},{"name":"POD_NAME","valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}},{"name":"CLUSTER_NAME","value":"demo"},{"name":"HEADLESS_SERVICE_NAME","value":"demo-tikv-peer"},{"name":"CAPACITY","value":"0"},{"name":"TZ","value":"UTC"}],"resources":{},"volumeMounts":[{"name":"annotations","readOnly":true,"mountPath":"/etc/podinfo"},{"name":"tikv","mountPath":"/var/lib/tikv"},{"name":"config","readOnly":true,"mountPath":"/etc/tikv"},{"name":"startup-script","readOnly":true,"mountPath":"/usr/local/bin"}],"imagePullPolicy":"IfNotPresent","securityContext":{"privileged":false}}],"restartPolicy":"Always","dnsPolicy":"ClusterFirst","securityContext":{},"affinity":{},"schedulerName":"tidb-scheduler"}},"volumeClaimTemplates":[{"metadata":{"name":"tikv","creationTimestamp":null},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"10Gi"}},"storageClassName":"hostpath","dataSource":null},"status":{}}],"serviceName":"demo-tikv-peer","podManagementPolicy":"Parallel","updateStrategy":{"type":"RollingUpdate","rollingUpdate":{"partition":1}}}'
+#  creationTimestamp: "2019-10-26T06:58:34Z"
+#  generation: 1
+#  labels:
+#    app.kubernetes.io/component: tikv
+#    app.kubernetes.io/instance: demo
+#    app.kubernetes.io/managed-by: tidb-operator
+#    app.kubernetes.io/name: tidb-cluster
+#  name: demo-tikv
+#  namespace: tidb
+#  ownerReferences:
+#    - apiVersion: pingcap.com/v1alpha1
+#      blockOwnerDeletion: true
+#      controller: true
+#      kind: TidbCluster
+#      name: demo
+#      uid: f99330d3-f7bd-11e9-accd-025000000001
+#  resourceVersion: "222202"
+#  selfLink: /apis/apps/v1/namespaces/tidb/statefulsets/demo-tikv
+#  uid: 06c98a75-f7be-11e9-accd-025000000001
+#spec:
+#  podManagementPolicy: Parallel
+#  replicas: 1
+#  revisionHistoryLimit: 10
+#  selector:
+#    matchLabels:
+#      app.kubernetes.io/component: tikv
+#      app.kubernetes.io/instance: demo
+#      app.kubernetes.io/managed-by: tidb-operator
+#      app.kubernetes.io/name: tidb-cluster
+#  serviceName: demo-tikv-peer
+#  template:
+#    metadata:
+#      annotations:
+#        pingcap.com/last-applied-configuration: '{"volumes":[{"name":"annotations","downwardAPI":{"items":[{"path":"annotations","fieldRef":{"fieldPath":"metadata.annotations"}}]}},{"name":"config","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"config-file","path":"tikv.toml"}]}},{"name":"startup-script","configMap":{"name":"demo-tikv-3ad7c4dd","items":[{"key":"startup-script","path":"tikv_start_script.sh"}]}}],"containers":[{"name":"tikv","image":"pingcap/tikv:v3.0.4","command":["/bin/sh","/usr/local/bin/tikv_start_script.sh"],"ports":[{"name":"server","containerPort":20160,"protocol":"TCP"}],"env":[{"name":"NAMESPACE","valueFrom":{"fieldRef":{"fieldPath":"metadata.namespace"}}},{"name":"POD_NAME","valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}},{"name":"CLUSTER_NAME","value":"demo"},{"name":"HEADLESS_SERVICE_NAME","value":"demo-tikv-peer"},{"name":"CAPACITY","value":"0"},{"name":"TZ","value":"UTC"}],"resources":{},"volumeMounts":[{"name":"annotations","readOnly":true,"mountPath":"/etc/podinfo"},{"name":"tikv","mountPath":"/var/lib/tikv"},{"name":"config","readOnly":true,"mountPath":"/etc/tikv"},{"name":"startup-script","readOnly":true,"mountPath":"/usr/local/bin"}],"imagePullPolicy":"IfNotPresent","securityContext":{"privileged":false}}],"restartPolicy":"Always","dnsPolicy":"ClusterFirst","securityContext":{},"affinity":{},"schedulerName":"tidb-scheduler"}'
+#        prometheus.io/path: /metrics
+#        prometheus.io/port: "20180"
+#        prometheus.io/scrape: "true"
+#      creationTimestamp: null
+#      labels:
+#        app.kubernetes.io/component: tikv
+#        app.kubernetes.io/instance: demo
+#        app.kubernetes.io/managed-by: tidb-operator
+#        app.kubernetes.io/name: tidb-cluster
+#    spec:
+#      affinity: {}
+#      containers:
+#        - command:
+#            - /bin/sh
+#            - /usr/local/bin/tikv_start_script.sh
+#          env:
+#            - name: NAMESPACE
+#              valueFrom:
+#                fieldRef:
+#                  apiVersion: v1
+#                  fieldPath: metadata.namespace
+#            - name: POD_NAME
+#              valueFrom:
+#                fieldRef:
+#                  apiVersion: v1
+#                  fieldPath: metadata.name
+#            - name: CLUSTER_NAME
+#              value: demo
+#            - name: HEADLESS_SERVICE_NAME
+#              value: demo-tikv-peer
+#            - name: CAPACITY
+#              value: "0"
+#            - name: TZ
+#              value: UTC
+#          image: pingcap/tikv:v3.0.4
+#          imagePullPolicy: IfNotPresent
+#          name: tikv
+#          ports:
+#            - containerPort: 20160
+#              name: server
+#              protocol: TCP
+#          resources: {}
+#          securityContext:
+#            privileged: false
+#            procMount: Default
+#          terminationMessagePath: /dev/termination-log
+#          terminationMessagePolicy: File
+#          volumeMounts:
+#            - mountPath: /etc/podinfo
+#              name: annotations
+#              readOnly: true
+#            - mountPath: /var/lib/tikv
+#              name: tikv
+#            - mountPath: /etc/tikv
+#              name: config
+#              readOnly: true
+#            - mountPath: /usr/local/bin
+#              name: startup-script
+#              readOnly: true
+#      dnsPolicy: ClusterFirst
+#      restartPolicy: Always
+#      schedulerName: tidb-scheduler
+#      securityContext: {}
+#      terminationGracePeriodSeconds: 30
+#      volumes:
+#        - downwardAPI:
+#            defaultMode: 420
+#            items:
+#              - fieldRef:
+#                  apiVersion: v1
+#                  fieldPath: metadata.annotations
+#                path: annotations
+#          name: annotations
+#        - configMap:
+#            defaultMode: 420
+#            items:
+#              - key: config-file
+#                path: tikv.toml
+#            name: demo-tikv-3ad7c4dd
+#          name: config
+#        - configMap:
+#            defaultMode: 420
+#            items:
+#              - key: startup-script
+#                path: tikv_start_script.sh
+#            name: demo-tikv-3ad7c4dd
+#          name: startup-script
+#  updateStrategy:
+#    rollingUpdate:
+#      partition: 1
+#    type: RollingUpdate
+#  volumeClaimTemplates:
+#    - metadata:
+#        creationTimestamp: null
+#        name: tikv
+#      spec:
+#        accessModes:
+#          - ReadWriteOnce
+#        resources:
+#          requests:
+#            storage: 10Gi
+#        storageClassName: hostpath
+#        volumeMode: Filesystem
+#      status:
+#        phase: Pending
