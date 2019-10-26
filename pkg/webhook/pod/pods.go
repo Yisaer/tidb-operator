@@ -118,9 +118,9 @@ func generatePDCommand(name, namespace string) (commands []string) {
 	commands = append(commands, "--data-dir=/var/lib/pd")
 	commands = append(commands, fmt.Sprintf("--name=%s", name))
 	commands = append(commands, "--peer-urls=http://0.0.0.0:2380")
-	commands = append(commands, fmt.Sprintf("--advertise-peer-urls=%s", fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2380", name, namespace)))
+	commands = append(commands, fmt.Sprintf("--advertise-peer-urls=%s", fmt.Sprintf("http://%s.demo-peer.%s.svc:2380", name, namespace)))
 	commands = append(commands, "--client-urls=http://0.0.0.0:2379")
-	commands = append(commands, fmt.Sprintf("--advertise-client-urls=%s", fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2379", name, namespace)))
+	commands = append(commands, fmt.Sprintf("--advertise-client-urls=%s", fmt.Sprintf("http://%s.demo-peer.%s.svc:2379", name, namespace)))
 	commands = append(commands, "--config=/etc/pd/pd.toml")
 	commands = append(commands, generateJoinOrInitial(name, namespace))
 	return commands
@@ -129,7 +129,7 @@ func generatePDCommand(name, namespace string) (commands []string) {
 func generateJoinOrInitial(name, namespace string) (command string) {
 	ordinal := getPodOrdinal(name)
 	if ordinal < 1 {
-		command = fmt.Sprintf("--initial-cluster=%s=http://%s.demo-pd-peer.%s.svc:2380", name, name, namespace)
+		command = fmt.Sprintf("--initial-cluster=%s=http://%s.demo-peer.%s.svc:2380", name, name, namespace)
 	} else {
 		command = fmt.Sprintf("--join=%s", generateJoinAibo(name, namespace))
 	}
@@ -150,7 +150,7 @@ func generateJoinAibo(name, namespace string) (aibo string) {
 			aibo = aibo + ","
 		}
 		podName := generatePodName(name, int32(i))
-		aibo = aibo + fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2380", podName, namespace)
+		aibo = aibo + fmt.Sprintf("http://%s.demo-peer.%s.svc:2380", podName, namespace)
 	}
 	return aibo
 }
