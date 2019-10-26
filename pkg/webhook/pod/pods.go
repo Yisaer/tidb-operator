@@ -14,24 +14,29 @@
 package pod
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/golang/glog"
-	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
-	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/pkg/pdapi"
 	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"strconv"
+	"strings"
 )
 
+type patchOperation struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+}
+
 var (
-	versionCli versioned.Interface
-	pdControl  pdapi.PDControlInterface
-	kubeCli    kubernetes.Interface
+	pdControl    pdapi.PDControlInterface
+	kubeCli      kubernetes.Interface
+	deserializer runtime.Decoder
 )
 
 func init() {
@@ -39,6 +44,7 @@ func init() {
 	if pdControl == nil {
 		pdControl = pdapi.NewDefaultPDControl()
 	}
+	deserializer = util.GetCodec()
 }
 
 func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
@@ -48,91 +54,109 @@ func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	operation := ar.Request.Operation
 	glog.Infof("receive admission to %s pod[%s/%s]", operation, namespace, name)
 
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		glog.Errorf("Create k8s cluster config failed, err: %v,refuse to %s pod[%s,%s]", err, operation, namespace, name)
-		return util.ARFail(err)
-	}
-
-	if versionCli == nil {
-		versionCli, err = versioned.NewForConfig(cfg)
-		if err != nil {
-			glog.Errorf("Create ClientSet failed, err: %v,refuse to %s pod[%s,%s]", err, operation, namespace, name)
-			return util.ARFail(err)
-		}
-	}
-
-	if kubeCli == nil {
-		kubeCli, err = kubernetes.NewForConfig(cfg)
-		if err != nil {
-			glog.Errorf("Create k8s client failed, err: %v,refuse to %s pod[%s,%s]", err, operation, namespace, name)
-			return util.ARFail(err)
-		}
-	}
-
-	pod, err := kubeCli.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		glog.Errorf("Failed to get pod [%s/%s],refuse to %s pod", namespace, name, operation)
-		return util.ARFail(err)
-	}
-
 	switch operation {
-	case v1beta1.Delete:
-		return AdmitDeletePods(pod)
+	case v1beta1.Create:
+		return AdmitCreatePod(ar)
 	default:
-		glog.Infof("Admit to %s pod[%s/%s]", operation, namespace, name)
 		return util.ARSuccess()
 	}
 }
 
-func AdmitDeletePods(pod *core.Pod) *v1beta1.AdmissionResponse {
+func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 
-	name := pod.Name
-	namespace := pod.Namespace
-
-	l := label.Label(pod.Labels)
-	if !(l.IsPD() || l.IsTiKV() || l.IsTiDB()) {
-		glog.Infof("pod[%s/%s] is not TiDB component,admit to delete", namespace, name)
-		return util.ARSuccess()
-	}
-
-	tcName, exist := pod.Labels[label.InstanceLabelKey]
-	if !exist {
-		glog.Errorf("pod[%s/%s] has no label: %s", namespace, name, label.InstanceLabelKey)
-		return util.ARFail(fmt.Errorf("pod[%s/%s] has no label: %s", namespace, name, label.InstanceLabelKey))
-	}
-
-	tc, err := versionCli.PingcapV1alpha1().TidbClusters(namespace).Get(tcName, metav1.GetOptions{})
-
-	if err != nil {
-		if errors.IsNotFound(err) {
-			glog.Infof("tc[%s/%s] had been deleted,admit to delete pod[%s/%s]", namespace, tcName, namespace, name)
-			return util.ARSuccess()
-		}
-		glog.Errorf("failed get tc[%s/%s],refuse to delete pod[%s/%s]", namespace, tcName, namespace, name)
+	name := ar.Request.Name
+	namespace := ar.Request.Namespace
+	raw := ar.Request.OldObject.Raw
+	pod := core.Pod{}
+	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
+		glog.Errorf("pod %s/%s, decode request failed, err: %v", namespace, name, err)
 		return util.ARFail(err)
 	}
-
-	if len(pod.OwnerReferences) == 0 {
+	_, existed := pod.Labels["app.kubernetes.io/instance"]
+	if !existed {
 		return util.ARSuccess()
 	}
-
-	ownerStatefulSetName := pod.OwnerReferences[0].Name
-	ownerStatefulSet, err := kubeCli.AppsV1().StatefulSets(namespace).Get(ownerStatefulSetName, metav1.GetOptions{})
-
+	patchBytes, err := createPatch(name, namespace)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			glog.Infof("statefulset[%s/%s] had been deleted,admit to delete pod[%s/%s]", namespace, ownerStatefulSetName, namespace, name)
-			return util.ARSuccess()
+		return util.ARFail(err)
+	}
+	return &v1beta1.AdmissionResponse{
+		Allowed: true,
+		Patch:   patchBytes,
+		PatchType: func() *v1beta1.PatchType {
+			pt := v1beta1.PatchTypeJSONPatch
+			return &pt
+		}(),
+	}
+}
+
+// create mutation patch
+func createPatch(name, namespace string) ([]byte, error) {
+	var patch []patchOperation
+	patch = append(patch, editPod(name, namespace))
+
+	return json.Marshal(patch)
+}
+
+func editPod(name, namespace string) (patch patchOperation) {
+	// edit container commands
+	commands := generatePDCommand(name, namespace)
+	patch = patchOperation{
+		Op:    "add",
+		Path:  "/spec/containers/0/command",
+		Value: commands,
+	}
+	return patch
+}
+
+func generatePDCommand(name, namespace string) (commands []string) {
+	commands = append(commands, "/pd-server")
+	commands = append(commands, "/pd-server")
+	commands = append(commands, "--data-dir=/var/lib/pd")
+	commands = append(commands, fmt.Sprintf("--name=%s", name))
+	commands = append(commands, "--peer-urls=http://0.0.0.0:2380")
+	commands = append(commands, fmt.Sprintf("--advertise-peer-urls=%s", fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2380", name, namespace)))
+	commands = append(commands, "--client-urls=http://0.0.0.0:2379")
+	commands = append(commands, fmt.Sprintf("--advertise-client-urls=%s", fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2379", name, namespace)))
+	commands = append(commands, "--config=/etc/pd/pd.toml")
+	commands = append(commands, generateJoinOrInitial(name, namespace))
+	return commands
+}
+
+func generateJoinOrInitial(name, namespace string) (command string) {
+	ordinal := getPodOrdinal(name)
+	if ordinal < 1 {
+		command = fmt.Sprintf("--initial-cluster=%s=http://%s.demo-pd-peer.%s.svc:2380", name, name, namespace)
+	} else {
+		command = fmt.Sprintf("--join=%s", generateJoinAibo(name, namespace))
+	}
+	return command
+}
+
+func getPodOrdinal(name string) int32 {
+	parts := strings.Split(name, "-")
+	ordinal, _ := strconv.ParseInt(parts[len(parts)-1], 10, 32)
+	return int32(ordinal)
+}
+
+func generateJoinAibo(name, namespace string) (aibo string) {
+	ordinal := getPodOrdinal(name)
+	aibo = ""
+	for i := 0; int32(i) < ordinal; i++ {
+		if i > 0 {
+			aibo = aibo + ","
 		}
-		glog.Errorf("failed to get statefulset[%s/%s],refuse to delete pod[%s/%s]", namespace, ownerStatefulSetName, namespace, name)
-		return util.ARFail(fmt.Errorf("failed to get statefulset[%s/%s],refuse to delete pod[%s/%s]", namespace, ownerStatefulSetName, namespace, name))
+		podName := generatePodName(name, int32(i))
+		aibo = aibo + fmt.Sprintf("http://%s.demo-pd-peer.%s.svc:2380", podName, namespace)
 	}
+	return aibo
+}
 
-	if l.IsPD() {
-		return AdmitDeletePdPods(pod, ownerStatefulSet, tc)
+func generatePodName(name string, oridnal int32) (podName string) {
+	parts := strings.Split(name, "-")
+	podName = ""
+	for i := 0; i < len(parts)-1; i++ {
+		podName = podName + parts[i] + "-"
 	}
-
-	glog.Infof("[%s/%s] is admit to be deleted", namespace, name)
-	return util.ARSuccess()
+	return podName + strconv.FormatInt(int64(oridnal), 10)
 }

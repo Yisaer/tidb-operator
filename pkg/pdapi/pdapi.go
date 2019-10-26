@@ -75,6 +75,7 @@ func (pdc *defaultPDControl) GetPDClient(namespace Namespace, tcName string, tls
 
 // pdClientKey returns the pd client key
 func pdClientKey(scheme string, namespace Namespace, clusterName string) string {
+	// http.demo.tidb
 	return fmt.Sprintf("%s.%s.%s", scheme, clusterName, string(namespace))
 }
 

@@ -34,7 +34,7 @@ type WebhookServer struct {
 
 func NewWebHookServer(kubecli kubernetes.Interface, cli versioned.Interface, certFile string, keyFile string) *WebhookServer {
 
-	http.HandleFunc("/statefulsets", route.ServeStatefulSets)
+	//http.HandleFunc("/statefulsets", route.ServeStatefulSets)
 	http.HandleFunc("/pods", route.ServePods)
 
 	sCert, err := util.ConfigTLS(certFile, keyFile)

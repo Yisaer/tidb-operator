@@ -49,7 +49,7 @@ discovery:
 	$(GO) -ldflags '$(LDFLAGS)' -o images/tidb-operator/bin/tidb-discovery cmd/discovery/main.go
 
 admission-controller:
-	$(GO) -ldflags '$(LDFLAGS)' -o images/tidb-operator/bin/tidb-admission-controller cmd/admission-controller/main.go
+	$(GO) -ldflags '$(LDFLAGS)' -o images/webhook/bin/tidb-admission-controller cmd/admission-controller/main.go
 
 backup-manager:
 	$(GO) -ldflags '$(LDFLAGS)' -o images/backup-manager/bin/tidb-backup-manager cmd/backup-manager/main.go
