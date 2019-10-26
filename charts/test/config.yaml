@@ -1,0 +1,13 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: pd-config
+  namespace: test
+  labels:
+    app.kubernetes.io/instance: test
+data:
+  config-file: |-
+    [log]
+    level = "info"
+    [replication]
+    location-labels = ["region", "zone", "rack", "host"]

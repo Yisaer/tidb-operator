@@ -63,13 +63,10 @@ func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 }
 
 func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-
-	name := ar.Request.Name
-	namespace := ar.Request.Namespace
-	raw := ar.Request.OldObject.Raw
+	raw := ar.Request.Object.Raw
 	pod := core.Pod{}
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		glog.Errorf("pod %s/%s, decode request failed, err: %v", namespace, name, err)
+		glog.Errorf("pod %s/%s, decode request failed, err: %v", pod.Name, pod.Namespace, err)
 		return util.ARFail(err)
 	}
 	_, existed := pod.Labels["app.kubernetes.io/instance"]
@@ -79,6 +76,9 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	if pod.Labels["app.kubernetes.io/instance"] != "test" {
 		return util.ARSuccess()
 	}
+
+	name := pod.Name
+	namespace := pod.Namespace
 
 	patchBytes, err := createPatch(name, namespace)
 	if err != nil {
@@ -114,7 +114,6 @@ func editPod(name, namespace string) (patch patchOperation) {
 }
 
 func generatePDCommand(name, namespace string) (commands []string) {
-	commands = append(commands, "/pd-server")
 	commands = append(commands, "/pd-server")
 	commands = append(commands, "--data-dir=/var/lib/pd")
 	commands = append(commands, fmt.Sprintf("--name=%s", name))

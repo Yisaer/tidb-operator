@@ -1,0 +1,105 @@
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app.kubernetes.io/instance: test
+  name: demo
+  namespace: test
+spec:
+  podManagementPolicy: Parallel
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: test
+  serviceName: demo-peer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: test
+    spec:
+      containers:
+        - command:
+            - /pd-server
+            - --data-dir=/var/lib/pd
+            - --name=
+            - --peer-urls=http://0.0.0.0:2380
+            - --advertise-peer-urls=
+            - --client-urls=http://0.0.0.0:2379
+            - --advertise-client-urls=http://demo-pd-0.demo-pd-peer.tidb.svc:2379
+            - --config=/etc/pd/pd.toml
+            - --join=http://demo-pd-1.demo-pd-peer.tidb.svc:2380
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: PEER_SERVICE_NAME
+              value: demo-peer
+            - name: TZ
+              value: UTC
+          image: pingcap/pd:v3.0.4
+          imagePullPolicy: IfNotPresent
+          name: pd
+          ports:
+            - containerPort: 2380
+              name: server
+              protocol: TCP
+            - containerPort: 2379
+              name: client
+              protocol: TCP
+          resources:
+            requests:
+              memory: 128Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /etc/podinfo
+              name: annotations
+              readOnly: true
+            - mountPath: /etc/pd
+              name: config
+              readOnly: true
+            - mountPath: /var/lib/pd
+              name: pd
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: tidb-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - downwardAPI:
+            defaultMode: 420
+            items:
+              - fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.annotations
+                path: annotations
+          name: annotations
+        - configMap:
+            defaultMode: 420
+            items:
+              - key: config-file
+                path: pd.toml
+            name: pd-config
+          name: config
+  volumeClaimTemplates:
+    - metadata:
+        creationTimestamp: null
+        name: pd
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        storageClassName: hostpath
+        volumeMode: Filesystem
+---
