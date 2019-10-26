@@ -66,6 +66,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 		marshalAndWrite(responseAdmissionReview, w)
 		return
 	}
+	glog.Infof("receive request body = " + string(data[:]))
 
 	body = data
 
