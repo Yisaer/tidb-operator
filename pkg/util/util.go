@@ -98,9 +98,9 @@ func IsPodOutOfOrdinalOrdinal(pod *corev1.Pod, expectedReplicas int32) (bool, er
 		return false, err
 	}
 	if ordinal < expectedReplicas {
-		return true, nil
+		return false, nil
 	}
-	return false, nil
+	return true, nil
 }
 
 func OrdinalPVCName(memberType v1alpha1.MemberType, setName string, ordinal int32) string {

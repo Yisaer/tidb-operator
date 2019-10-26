@@ -232,11 +232,11 @@ func TestPDScalerScaleOut(t *testing.T) {
 func TestPDScalerScaleIn(t *testing.T) {
 	g := NewGomegaWithT(t)
 	type testcase struct {
-		name             string
-		pdUpgrading      bool
-		hasPVC           bool
-		pvcUpdateErr     bool
-		deleteMemberErr  bool
+		name        string
+		pdUpgrading bool
+		//hasPVC           bool
+		//pvcUpdateErr     bool
+		//deleteMemberErr  bool
 		statusSyncFailed bool
 		err              bool
 		changed          bool
@@ -254,23 +254,23 @@ func TestPDScalerScaleIn(t *testing.T) {
 		newSet := oldSet.DeepCopy()
 		newSet.Spec.Replicas = controller.Int32Ptr(3)
 
-		scaler, pdControl, pvcIndexer, pvcControl := newFakePDScaler()
+		scaler, _, _, _ := newFakePDScaler()
 
-		if test.hasPVC {
-			pvc := newPVCForStatefulSet(oldSet, v1alpha1.PDMemberType)
-			pvcIndexer.Add(pvc)
-		}
+		//if test.hasPVC {
+		//	pvc := newPVCForStatefulSet(oldSet, v1alpha1.PDMemberType)
+		//	pvcIndexer.Add(pvc)
+		//}
 
-		pdClient := controller.NewFakePDClient(pdControl, tc)
+		//pdClient := controller.NewFakePDClient(pdControl, tc)
 
-		if test.deleteMemberErr {
-			pdClient.AddReaction(pdapi.DeleteMemberActionType, func(action *pdapi.Action) (interface{}, error) {
-				return nil, fmt.Errorf("error")
-			})
-		}
-		if test.pvcUpdateErr {
-			pvcControl.SetUpdatePVCError(errors.NewInternalError(fmt.Errorf("API server failed")), 0)
-		}
+		//if test.deleteMemberErr {
+		//	pdClient.AddReaction(pdapi.DeleteMemberActionType, func(action *pdapi.Action) (interface{}, error) {
+		//		return nil, fmt.Errorf("error")
+		//	})
+		//}
+		//if test.pvcUpdateErr {
+		//	pvcControl.SetUpdatePVCError(errors.NewInternalError(fmt.Errorf("API server failed")), 0)
+		//}
 
 		tc.Status.PD.Synced = !test.statusSyncFailed
 
@@ -289,61 +289,61 @@ func TestPDScalerScaleIn(t *testing.T) {
 
 	tests := []testcase{
 		{
-			name:             "normal",
-			pdUpgrading:      false,
-			hasPVC:           true,
-			pvcUpdateErr:     false,
-			deleteMemberErr:  false,
+			name:        "normal",
+			pdUpgrading: false,
+			//hasPVC:           true,
+			//pvcUpdateErr:     false,
+			//deleteMemberErr:  false,
 			statusSyncFailed: false,
 			err:              false,
 			changed:          true,
 		},
 		{
-			name:             "pd is upgrading",
-			pdUpgrading:      true,
-			hasPVC:           true,
-			pvcUpdateErr:     false,
-			deleteMemberErr:  false,
+			name:        "pd is upgrading",
+			pdUpgrading: true,
+			//hasPVC:           true,
+			//pvcUpdateErr:     false,
+			//deleteMemberErr:  false,
 			statusSyncFailed: false,
 			err:              false,
 			changed:          false,
 		},
+		//{
+		//	name:             "error when delete member",
+		//	//hasPVC:           true,
+		//	//pvcUpdateErr:     false,
+		//	pdUpgrading:      false,
+		//	//deleteMemberErr:  true,
+		//	statusSyncFailed: false,
+		//	err:              true,
+		//	changed:          false,
+		//},
+		//{
+		//	name:             "cache don't have pvc",
+		//	pdUpgrading:      false,
+		//	//hasPVC:           false,
+		//	//pvcUpdateErr:     false,
+		//	//deleteMemberErr:  false,
+		//	statusSyncFailed: false,
+		//	err:              true,
+		//	changed:          false,
+		//},
+		//{
+		//	name:             "error when update pvc",
+		//	pdUpgrading:      false,
+		//	//hasPVC:           true,
+		//	//pvcUpdateErr:     true,
+		//	//deleteMemberErr:  false,
+		//	statusSyncFailed: false,
+		//	err:              true,
+		//	changed:          false,
+		//},
 		{
-			name:             "error when delete member",
-			hasPVC:           true,
-			pvcUpdateErr:     false,
-			pdUpgrading:      false,
-			deleteMemberErr:  true,
-			statusSyncFailed: false,
-			err:              true,
-			changed:          false,
-		},
-		{
-			name:             "cache don't have pvc",
-			pdUpgrading:      false,
-			hasPVC:           false,
-			pvcUpdateErr:     false,
-			deleteMemberErr:  false,
-			statusSyncFailed: false,
-			err:              true,
-			changed:          false,
-		},
-		{
-			name:             "error when update pvc",
-			pdUpgrading:      false,
-			hasPVC:           true,
-			pvcUpdateErr:     true,
-			deleteMemberErr:  false,
-			statusSyncFailed: false,
-			err:              true,
-			changed:          false,
-		},
-		{
-			name:             "pd status sync failed",
-			pdUpgrading:      false,
-			hasPVC:           true,
-			pvcUpdateErr:     false,
-			deleteMemberErr:  false,
+			name:        "pd status sync failed",
+			pdUpgrading: false,
+			//hasPVC:           true,
+			//pvcUpdateErr:     false,
+			//deleteMemberErr:  false,
 			statusSyncFailed: true,
 			err:              true,
 			changed:          false,

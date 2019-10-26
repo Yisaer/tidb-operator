@@ -25,7 +25,7 @@ func IsPodInPdMembers(tc *v1alpha1.TidbCluster, pod *core.Pod, pdClient pdapi.PD
 	namespace := pod.Namespace
 	memberInfo, err := pdClient.GetMembers()
 	if err != nil {
-		return false, fmt.Errorf("tc[%s/%s] failed to get pd memberInfo during delete pod[%s/%s],%v", namespace, tc.Name, namespace, name, err)
+		return true, fmt.Errorf("tc[%s/%s] failed to get pd memberInfo during delete pod[%s/%s],%v", namespace, tc.Name, namespace, name, err)
 	}
 	for _, member := range memberInfo.Members {
 		if member.Name == name {
