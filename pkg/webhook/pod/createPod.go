@@ -9,7 +9,6 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"strconv"
 	"strings"
 )
@@ -32,11 +31,34 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	name := pod.Name
 	namespace := pod.Namespace
 
+	pvc1Name, pvc2Name := generatePVCName(name)
+	is1Need, err := checkPVCNeedDelete(pvc1Name, namespace)
+	if err != nil {
+		return util.ARFail(err)
+	}
+	is2Need, err := checkPVCNeedDelete(pvc2Name, namespace)
+	if err != nil {
+		return util.ARFail(err)
+	}
+
+	glog.Infof("createPod,PVC1=%v,PVC2=%v", is1Need, is2Need)
+	if is1Need || is2Need {
+		if is1Need {
+			deletePVC(pvc1Name, namespace)
+		}
+		if is2Need {
+			deletePVC(pvc2Name, namespace)
+		}
+		glog.Infof("AfterDeletePVC,NextTime")
+		return &v1beta1.AdmissionResponse{
+			Allowed: false,
+		}
+	}
+
 	patchBytes, err := createPatch(name, namespace)
 	if err != nil {
 		return util.ARFail(err)
 	}
-	err = createService(name, namespace)
 	if err != nil {
 		return util.ARFail(err)
 	}
@@ -49,48 +71,6 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			return &pt
 		}(),
 	}
-}
-
-func createService(name, namespace string) error {
-	_, err := kubeCli.CoreV1().Services(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			svc := generateService(name)
-			_, err := kubeCli.CoreV1().Services(namespace).Create(svc)
-			if err != nil {
-				return err
-			}
-			return nil
-		} else {
-			return err
-		}
-	}
-	return nil
-}
-
-func generateService(name string) *core.Service {
-	pdLabel := map[string]string{
-		"statefulset.kubernetes.io/pod-name": name,
-	}
-	svc := &core.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: pdLabel,
-		},
-		Spec: core.ServiceSpec{
-			Type: core.ServiceTypeNodePort,
-			Ports: []core.ServicePort{
-				{
-					Name:       "tikv",
-					Port:       20160,
-					TargetPort: intstr.FromInt(20160),
-					Protocol:   core.ProtocolTCP,
-				},
-			},
-			Selector: pdLabel,
-		},
-	}
-	return svc
 }
 
 // create mutation patch
@@ -158,12 +138,6 @@ func generateJoinOrInitial(name, namespace string) (command string) {
 	return command
 }
 
-func getPodOrdinal(name string) int32 {
-	parts := strings.Split(name, "-")
-	ordinal, _ := strconv.ParseInt(parts[len(parts)-1], 10, 32)
-	return int32(ordinal)
-}
-
 func generateJoinAibo(name, namespace string) (aibo string) {
 	ordinal := getPodOrdinal(name)
 	aibo = ""
@@ -184,4 +158,27 @@ func generatePodName(name string, oridnal int32) (podName string) {
 		podName = podName + parts[i] + "-"
 	}
 	return podName + strconv.FormatInt(int64(oridnal), 10)
+}
+
+func checkPVCNeedDelete(pvcName, namespace string) (bool, error) {
+	glog.Infof("start to find pvc %s", pvcName)
+	pvc, err := kubeCli.CoreV1().PersistentVolumeClaims(namespace).Get(pvcName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			glog.Infof("failed to find pvc %s", pvcName)
+			return false, nil
+		}
+		return false, err
+	}
+	_, existed := pvc.Annotations[deleteWhenCreate]
+	if existed {
+		glog.Infof("pvc %s with annotation", pvcName)
+		return true, nil
+	}
+	glog.Infof("pvc %s without annotation", pvcName)
+	return false, nil
+}
+
+func deletePVC(pvcName, namespace string) {
+	kubeCli.CoreV1().PersistentVolumeClaims(namespace).Delete(pvcName, &metav1.DeleteOptions{})
 }

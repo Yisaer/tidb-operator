@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -37,6 +39,7 @@ var (
 	pdControl    pdapi.PDControlInterface
 	kubeCli      kubernetes.Interface
 	deserializer runtime.Decoder
+
 )
 
 func init() {
@@ -64,12 +67,19 @@ func AdmitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	operation := ar.Request.Operation
 	glog.Infof("receive admission to %s pod[%s/%s]", operation, namespace, name)
 
+
 	switch operation {
 	case v1beta1.Create:
 		return AdmitCreatePod(ar)
-	//case v1beta1.Delete:
-	//	return AdmitDeletePod(ar)
+	case v1beta1.Delete:
+		return AdmitDeletePod(ar)
 	default:
 		return util.ARSuccess()
 	}
+}
+
+func getPodOrdinal(name string) int32 {
+	parts := strings.Split(name, "-")
+	ordinal, _ := strconv.ParseInt(parts[len(parts)-1], 10, 32)
+	return int32(ordinal)
 }
