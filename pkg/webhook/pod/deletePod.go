@@ -8,8 +8,10 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/webhook/util"
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
+	"time"
 )
 
 const (
@@ -34,6 +36,15 @@ func AdmitDeletePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 		return util.ARSuccess()
 	}
 
+	stsName := pod.OwnerReferences[0].Name
+	_, err = kubeCli.AppsV1().StatefulSets(namespace).Get(stsName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			glog.Infof("sts is deleted")
+			return util.ARSuccess()
+		}
+	}
+
 	isInRange, err := isInRange(name, namespace, pod)
 	if err != nil {
 		return util.ARFail(err)
@@ -43,6 +54,30 @@ func AdmitDeletePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	}
 
 	pdClient := pdControl.GetPDClient(pdapi.Namespace(namespace), "demo", false)
+
+	stores, err := getStores(pdClient, name)
+	if err != nil {
+		return util.ARFail(err)
+	}
+	isStoreExisted, store := checkStoreExisted(stores, name)
+	isTomb := false
+	if isStoreExisted {
+		isTomb = checkTomStone(store)
+		if !isTomb {
+			if store.Store.State != metapb.StoreState_Offline {
+				glog.Infof("start to delete store,address = %s", store.Store.Address)
+				err = pdClient.DeleteStore(store.Store.Id)
+				if err != nil {
+					glog.Infof("failed to delete member,%v", err)
+				}
+			}
+			return &v1beta1.AdmissionResponse{
+				Allowed: false,
+			}
+		}
+	}
+	glog.Infof("storeExisted = %v , TombStone = %v", isStoreExisted, isTomb)
+	glog.Infof("store is tombStone Or Store is Not existed Now")
 
 	isMember, err := isMember(pdClient, name)
 	if err != nil {
@@ -56,33 +91,14 @@ func AdmitDeletePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			Allowed: false,
 		}
 	}
+	glog.Infof("pd member[%s] is not existed now ", name)
 
-	stores, err := getStores(pdClient, name)
-	if err != nil {
-		return util.ARFail(err)
-	}
-	isStoreExisted, store := checkStoreExisted(stores, name)
-	isTomb := false
-	if isStoreExisted {
-		isTomb = checkTomStoneOrDelete(pdClient, store)
-		if !isTomb {
-			glog.Infof("store not tombStone,NextDelete")
-			return &v1beta1.AdmissionResponse{
-				Allowed: false,
-			}
-		}
-	}
-	glog.Infof("storeExisted = %v , tomBStome = %v", isStoreExisted, isTomb)
-	glog.Infof("store is tombStone Or Store is Not existed Now")
 	pvc1Name, pvc2Name := generatePVCName(name)
-	err = editPVC(pvc1Name, namespace)
-	if err != nil {
-		return util.ARFail(err)
-	}
-	err = editPVC(pvc2Name, namespace)
-	if err != nil {
-		return util.ARFail(err)
-	}
+	go func() {
+		time.Sleep(2 * time.Second)
+		deletePVC(pvc1Name, namespace)
+		deletePVC(pvc2Name, namespace)
+	}()
 
 	glog.Infof("mixed pod[%s/%s] admit to delete", namespace, name)
 	return util.ARSuccess()
@@ -113,14 +129,9 @@ func checkStoreExisted(stores []*pdapi.StoreInfo, name string) (bool, *pdapi.Sto
 	return false, nil
 }
 
-func checkTomStoneOrDelete(pdClient pdapi.PDClient, store *pdapi.StoreInfo) bool {
+func checkTomStone(store *pdapi.StoreInfo) bool {
 	if store.Store.State == metapb.StoreState_Tombstone {
 		return true
-	}
-	glog.Infof("start to delete store,address=%s,state=%s", store.Store.Address, store.Store.State.String())
-	err := pdClient.DeleteStore(store.Store.Id)
-	if err != nil {
-		glog.Errorf("pdClient Delete Failed:%v", err)
 	}
 	return false
 }

@@ -31,34 +31,42 @@ func AdmitCreatePod(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	name := pod.Name
 	namespace := pod.Namespace
 
-	pvc1Name, pvc2Name := generatePVCName(name)
-	is1Need, err := checkPVCNeedDelete(pvc1Name, namespace)
-	if err != nil {
-		return util.ARFail(err)
-	}
-	is2Need, err := checkPVCNeedDelete(pvc2Name, namespace)
-	if err != nil {
-		return util.ARFail(err)
-	}
+	//pvc1Name, pvc2Name := generatePVCName(name)
+	//is1Need, err := checkPVCNeedDelete(pvc1Name, namespace)
+	//if err != nil {
+	//	return util.ARFail(err)
+	//}
+	//is2Need, err := checkPVCNeedDelete(pvc2Name, namespace)
+	//if err != nil {
+	//	return util.ARFail(err)
+	//}
 
-	glog.Infof("createPod,PVC1=%v,PVC2=%v", is1Need, is2Need)
-	if is1Need || is2Need {
-		if is1Need {
-			deletePVC(pvc1Name, namespace)
-		}
-		if is2Need {
-			deletePVC(pvc2Name, namespace)
-		}
-		glog.Infof("AfterDeletePVC,NextTime")
-		return &v1beta1.AdmissionResponse{
-			Allowed: false,
-		}
-	}
+	//glog.Infof("createPod,PVC1=%v,PVC2=%v", is1Need, is2Need)
+	//if is1Need || is2Need {
+	//	if is1Need {
+	//		deletePVC(pvc1Name, namespace)
+	//	}
+	//	if is2Need {
+	//		deletePVC(pvc2Name, namespace)
+	//	}
+	//	glog.Infof("AfterDeletePVC,NextTime")
+	//	for {
+	//		if !is1Need && !is2Need {
+	//			break
+	//		} else {
+	//			is1Need, err = checkPVCNeedDelete(pvc1Name, namespace)
+	//			if err != nil {
+	//				return util.ARFail(err)
+	//			}
+	//			is2Need, err = checkPVCNeedDelete(pvc2Name, namespace)
+	//			if err != nil {
+	//				return util.ARFail(err)
+	//			}
+	//		}
+	//	}
+	//}
 
 	patchBytes, err := createPatch(name, namespace)
-	if err != nil {
-		return util.ARFail(err)
-	}
 	if err != nil {
 		return util.ARFail(err)
 	}
@@ -87,7 +95,7 @@ func createPatch(name, namespace string) ([]byte, error) {
 func addInitContainer() (patch patchOperation) {
 	var containers []core.Container
 	command := []string{
-		"sh", "-c", "sleep 30",
+		"sh", "-c", "sleep 8",
 	}
 	container := core.Container{
 		Name:            "init",
