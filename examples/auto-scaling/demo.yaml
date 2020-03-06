@@ -1,0 +1,88 @@
+apiVersion: pingcap.com/v1alpha1
+kind: TidbCluster
+metadata:
+  name: basic
+spec:
+  version: v3.0.8
+  timezone: UTC
+  enableTLSCluster: false
+  pvReclaimPolicy: Delete
+  pd:
+    baseImage: pingcap/pd
+    replicas: 3
+    requests:
+      storage: "1Gi"
+    config: {}
+  tikv:
+    baseImage: pingcap/tikv
+    replicas: 3
+    requests:
+      cpu: 1
+      storage: "10Gi"
+  tidb:
+    baseImage: pingcap/tidb
+    replicas: 2
+    service:
+      type: ClusterIP
+    config: {}
+    requests:
+      cpu: 1
+---
+apiVersion: pingcap.com/v1alpha1
+kind: TidbMonitor
+metadata:
+  name: basic
+spec:
+  clusters:
+    - name: basic
+  prometheus:
+    baseImage: prom/prometheus
+    version: v2.11.1
+  grafana:
+    baseImage: grafana/grafana
+    version: 6.0.1
+    service:
+      type: NodePort
+  initializer:
+    baseImage: pingcap/tidb-monitor-initializer
+    version: v3.0.5
+  reloader:
+    baseImage: pingcap/tidb-monitor-reloader
+    version: v1.0.1
+  imagePullPolicy: IfNotPresent
+---
+apiVersion: pingcap.com/v1alpha1
+kind: TidbClusterAutoScaler
+metadata:
+  name: basic
+spec:
+  cluster:
+    name: basic
+  monitor:
+    name: basic
+  tidb:
+    minReplicas: 1
+    maxReplicas: 2
+    scaleOutIntervalSeconds: 60
+    scaleInIntervalSeconds: 60
+    metricsTimeDuration: "1m"
+    metrics:
+      - type: "Resource"
+        resource:
+          name: "cpu"
+          target:
+            type: "Utilization"
+            averageUtilization: 60
+  tikv:
+    minReplicas: 3
+    maxReplicas: 4
+    scaleOutIntervalSeconds: 60
+    scaleInIntervalSeconds: 60
+    metricsTimeDuration: "1m"
+    metrics:
+      - type: "Resource"
+        resource:
+          name: "cpu"
+          target:
+            type: "Utilization"
+            averageUtilization: 60    
