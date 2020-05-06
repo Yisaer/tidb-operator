@@ -219,4 +219,7 @@ debug-build-docker: debug-build
 debug-build:
 	$(GO_BUILD) -ldflags '$(LDFLAGS)' -o misc/images/debug-launcher/bin/debug-launcher misc/cmd/debug-launcher/main.go
 
+fmt:
+	gofmt -s -l -w $(FILES) 2>&1| $(FAIL_ON_STDOUT)
+
 .PHONY: check check-setup check-all build e2e-build debug-build cli e2e test docker e2e-docker debug-build-docker
