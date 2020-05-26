@@ -161,6 +161,7 @@ func run() {
 			oa.CheckDisasterToleranceOrDie(cluster)
 		}
 		klog.Infof("clusters scale out and checked")
+		slack.NotifyAndCompletedf("stability test: clusters scale out and checked")
 
 		// scale in
 		for _, cluster := range clusters {
@@ -172,6 +173,7 @@ func run() {
 			oa.CheckDisasterToleranceOrDie(cluster)
 		}
 		klog.Infof("clusters scale in and checked")
+		slack.NotifyAndCompletedf("stability test: clusters scale in and checked")
 
 		// upgrade
 		namespace := os.Getenv("NAMESPACE")
@@ -184,6 +186,7 @@ func run() {
 			oa.CheckTidbClusterStatusOrDie(cluster)
 		}
 		klog.Infof("clusters upgraded in checked")
+		slack.NotifyAndCompletedf("stability test: clusters upgraded in checked")
 
 		// configuration change
 		for _, cluster := range clusters {
@@ -214,11 +217,13 @@ func run() {
 		cancel()
 		oa.CleanWebHookAndServiceOrDie(ocfg.WebhookConfigName)
 		klog.Infof("clusters configurations updated in checked")
+		slack.NotifyAndCompletedf("stability test: clusters configurations updated in checked")
 
 		for _, cluster := range clusters {
 			oa.CheckDisasterToleranceOrDie(cluster)
 		}
 		klog.Infof("clusters DisasterTolerance checked")
+		slack.NotifyAndCompletedf("stability test: clusters DisasterTolerance checked")
 
 		// backup and restore
 		for i := range backupTargets {
@@ -228,6 +233,7 @@ func run() {
 		}
 		oa.BackupAndRestoreToMultipleClustersOrDie(clusters[0], backupTargets)
 		klog.Infof("clusters backup and restore checked")
+		slack.NotifyAndCompletedf("stability test: clusters backup and restore checked")
 
 		// delete operator
 		oa.CleanOperatorOrDie(ocfg)
@@ -361,6 +367,8 @@ func run() {
 			IncrementalType: tests.DbTypeFile,
 		})
 	}
+	// hard code upgradeVersion as v4.0.0-rc.2 temporally
+	//upgradeVersions[0] = "v4.0.0-rc.2"
 	caseFn(preUpgrade, onePDCluster1, backupTargets, upgradeVersions[0])
 
 	// after operator upgrade
