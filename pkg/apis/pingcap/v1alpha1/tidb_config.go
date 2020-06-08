@@ -50,12 +50,20 @@ type TiDBConfig struct {
 	// Optional: Defaults to 1000
 	// +optional
 	TokenLimit *uint `toml:"token-limit,omitempty" json:"token-limit,omitempty"`
+	// +optional
+	OOMUseTmpStorage *bool `toml:"oom-use-tmp-storage,omitempty" json:"oom-use-tmp-storage,omitempty"`
+	// +optional
+	TempStoragePath *string `toml:"tmp-storage-path,omitempty" json:"tmp-storage-path,omitempty"`
 	// Optional: Defaults to log
 	// +optional
 	OOMAction *string `toml:"oom-action,omitempty" json:"oom-action,omitempty"`
 	// Optional: Defaults to 34359738368
 	// +optional
 	MemQuotaQuery *int64 `toml:"mem-quota-query,omitempty" json:"mem-quota-query,omitempty"`
+	// TempStorageQuota describe the temporary storage Quota during query exector when OOMUseTmpStorage is enabled
+	// If the quota exceed the capacity of the TempStoragePath, the tidb-server would exit with fatal error
+	// +optional
+	TempStorageQuota *int64 `toml:"tmp-storage-quota,omitempty" json:"tmp-storage-quota,omitempty"` // Bytes
 	// Optional: Defaults to false
 	// +optional
 	EnableStreaming *bool `toml:"enable-streaming,omitempty" json:"enable-streaming,omitempty"`
@@ -106,31 +114,31 @@ type TiDBConfig struct {
 	StmtSummary *StmtSummary `toml:"stmt-summary,omitempty" json:"stmt-summary,omitempty"`
 	// RepairMode indicates that the TiDB is in the repair mode for table meta.
 	// +optional
-	RepairMode *bool `toml:"repair-mode" json:"repair-mode,omitempty"`
+	RepairMode *bool `toml:"repair-mode,omitempty" json:"repair-mode,omitempty"`
 	// +optional
-	RepairTableList []string `toml:"repair-table-list" json:"repair-table-list,omitempty"`
+	RepairTableList []string `toml:"repair-table-list,omitempty" json:"repair-table-list,omitempty"`
 	// IsolationRead indicates that the TiDB reads data from which isolation level(engine and label).
 	// +optional
-	IsolationRead *IsolationRead `toml:"isolation-read" json:"isolation-read,omitempty"`
+	IsolationRead *IsolationRead `toml:"isolation-read,omitempty" json:"isolation-read,omitempty"`
 	// MaxServerConnections is the maximum permitted number of simultaneous client connections.
 	// +optional
-	MaxServerConnections *uint32 `toml:"max-server-connections" json:"max-server-connections,omitempty"`
+	MaxServerConnections *uint32 `toml:"max-server-connections,omitempty" json:"max-server-connections,omitempty"`
 	// NewCollationsEnabledOnFirstBootstrap indicates if the new collations are enabled, it effects only when a TiDB cluster bootstrapped on the first time.
 	// +optional
-	NewCollationsEnabledOnFirstBootstrap *bool `toml:"new_collations_enabled_on_first_bootstrap" json:"new_collations_enabled_on_first_bootstrap,omitempty"`
+	NewCollationsEnabledOnFirstBootstrap *bool `toml:"new_collations_enabled_on_first_bootstrap,omitempty" json:"new_collations_enabled_on_first_bootstrap,omitempty"`
 	// Experimental contains parameters for experimental features.
 	// +optional
-	Experimental *Experimental `toml:"experimental" json:"experimental,omitempty"`
+	Experimental *Experimental `toml:"experimental,omitempty" json:"experimental,omitempty"`
 	// EnableDynamicConfig enables the TiDB to fetch configs from PD and update itself during runtime.
 	// see https://github.com/pingcap/tidb/pull/13660 for more details.
 	// +optional
-	EnableDynamicConfig *bool `toml:"enable-dynamic-config" json:"enable-dynamic-config,omitempty"`
+	EnableDynamicConfig *bool `toml:"enable-dynamic-config,omitempty" json:"enable-dynamic-config,omitempty"`
 	// imported from v3.1.0
 	// optional
-	EnableTableLock *bool `toml:"enable-table-lock" json:"enable-table-lock,omitempty"`
+	EnableTableLock *bool `toml:"enable-table-lock,omitempty" json:"enable-table-lock,omitempty"`
 	// imported from v3.1.0
 	// optional
-	DelayCleanTableLock *uint64 `toml:"delay-clean-table-lock" json:"delay-clean-table-lock,omitempty"`
+	DelayCleanTableLock *uint64 `toml:"delay-clean-table-lock,omitempty" json:"delay-clean-table-lock,omitempty"`
 }
 
 // Log is the log section of config.
@@ -149,18 +157,18 @@ type Log struct {
 	DisableTimestamp *bool `toml:"disable-timestamp,omitempty" json:"disable-timestamp,omitempty"`
 	// EnableTimestamp enables automatic timestamps in log output.
 	// +optional
-	EnableTimestamp *bool `toml:"enable-timestamp" json:"enable-timestamp,omitempty"`
+	EnableTimestamp *bool `toml:"enable-timestamp,omitempty" json:"enable-timestamp,omitempty"`
 	// EnableErrorStack enables annotating logs with the full stack error
 	// message.
 	// +optional
-	EnableErrorStack *bool `toml:"enable-error-stack" json:"enable-error-stack,omitempty"`
+	EnableErrorStack *bool `toml:"enable-error-stack,omitempty" json:"enable-error-stack,omitempty"`
 	// File log config.
 	// +optional
 	File *FileLogConfig `toml:"file,omitempty" json:"file,omitempty"`
 	// +optional
-	EnableSlowLog *bool `toml:"enable-slow-log" json:"enable-slow-log,omitempty"`
+	EnableSlowLog *bool `toml:"enable-slow-log,omitempty" json:"enable-slow-log,omitempty"`
 	// +optional
-	SlowQueryFile *string `toml:"slow-query-file" json:"slow-query-file,omitempty"`
+	SlowQueryFile *string `toml:"slow-query-file,omitempty" json:"slow-query-file,omitempty"`
 	// Optional: Defaults to 300
 	// +optional
 	SlowThreshold *uint64 `toml:"slow-threshold,omitempty" json:"slow-threshold,omitempty"`
@@ -255,6 +263,12 @@ type Performance struct {
 	// Optional: Defaults to true
 	// +optional
 	RunAutoAnalyze *bool `toml:"run-auto-analyze,omitempty" json:"run-auto-analyze,omitempty"`
+	// +optional
+	DistinctAggPushDown *bool `toml:"distinct-agg-push-down,omitempty" json:"agg-push-down-join,omitempty"`
+	// +optional
+	CommitterConcurrency *int `toml:"committer-concurrency,omitempty" json:"committer-concurrency,omitempty"`
+	// +optional
+	MaxTxnTTL *uint64 `toml:"max-txn-ttl,omitempty" json:"max-txn-ttl,omitempty"`
 	// Optional: Defaults to 300000
 	// +optional
 	TxnEntryCountLimit *uint64 `toml:"txn-entry-count-limit,omitempty" json:"txn-entry-count-limit,omitempty"`
@@ -301,9 +315,9 @@ type OpenTracing struct {
 	// +optional
 	Enable *bool `toml:"enable,omitempty" json:"enable,omitempty"`
 	// +optional
-	Sampler OpenTracingSampler `toml:"sampler,omitempty" json:"sampler,omitempty"`
+	Sampler *OpenTracingSampler `toml:"sampler,omitempty" json:"sampler,omitempty"`
 	// +optional
-	Reporter OpenTracingReporter `toml:"reporter,omitempty" json:"reporter,omitempty"`
+	Reporter *OpenTracingReporter `toml:"reporter,omitempty" json:"reporter,omitempty"`
 	// +optional
 	RPCMetrics *bool `toml:"rpc-metrics,omitempty" json:"rpc-metrics,omitempty"`
 }
@@ -321,7 +335,7 @@ type OpenTracingSampler struct {
 	// +optional
 	MaxOperations *int `toml:"max-operations,omitempty" json:"max-operations,omitempty"`
 	// +optional
-	SamplingRefreshInterval time.Duration `toml:"sampling-refresh-interval,omitempty" json:"sampling-refresh-interval,omitempty"`
+	SamplingRefreshInterval *time.Duration `toml:"sampling-refresh-interval,omitempty" json:"sampling-refresh-interval,omitempty"`
 }
 
 // OpenTracingReporter is the config for opentracing reporter.
@@ -331,7 +345,7 @@ type OpenTracingReporter struct {
 	// +optional
 	QueueSize *int `toml:"queue-size,omitempty" json:"queue-size,omitempty"`
 	// +optional
-	BufferFlushInterval time.Duration `toml:"buffer-flush-interval,omitempty" json:"buffer-flush-interval,omitempty"`
+	BufferFlushInterval *time.Duration `toml:"buffer-flush-interval,omitempty" json:"buffer-flush-interval,omitempty"`
 	// +optional
 	LogSpans *bool `toml:"log-spans,omitempty" json:"log-spans,omitempty"`
 	// +optional
@@ -388,7 +402,7 @@ type TiKVClient struct {
 	// MaxBatchWaitTime in nanosecond is the max wait time for batch.
 	// Optional: Defaults to 0
 	// +optional
-	MaxBatchWaitTime time.Duration `toml:"max-batch-wait-time,omitempty" json:"max-batch-wait-time,omitempty"`
+	MaxBatchWaitTime *time.Duration `toml:"max-batch-wait-time,omitempty" json:"max-batch-wait-time,omitempty"`
 	// BatchWaitSize is the max wait size for batch.
 	// Optional: Defaults to 8
 	// +optional
@@ -402,9 +416,12 @@ type TiKVClient struct {
 	// prevent the store occupying too much token in dispatching level.
 	// Optional: Defaults to 0
 	// +optional
-	StoreLimit int64 `toml:"store-limit,omitempty" json:"store-limit,omitempty"`
+	StoreLimit *int64 `toml:"store-limit,omitempty" json:"store-limit,omitempty"`
+	// StoreLivenessTimeout is the timeout for store liveness check request.
 	// +optional
-	CoprCache *CoprocessorCache `toml:"copr-cache" json:"copr-cache,omitempty"`
+	StoreLivenessTimeout *string `toml:"store-liveness-timeout,omitempty" json:"store-liveness-timeout,omitempty"`
+	// +optional
+	CoprCache *CoprocessorCache `toml:"copr-cache,omitempty" json:"copr-cache,omitempty"`
 }
 
 // CoprocessorCache is the config for coprocessor cache.
@@ -412,23 +429,23 @@ type CoprocessorCache struct {
 	// Whether to enable the copr cache. The copr cache saves the result from TiKV Coprocessor in the memory and
 	// reuses the result when corresponding data in TiKV is unchanged, on a region basis.
 	// +optional
-	Enabled *bool `toml:"enabled" json:"enabled,omitempty"`
+	Enabled *bool `toml:"enabled,omitempty" json:"enabled,omitempty"`
 	// The capacity in MB of the cache.
 	// +optional
-	CapacityMB *float64 `toml:"capacity-mb" json:"capacity-mb,omitempty"`
+	CapacityMB *float64 `toml:"capacity-mb,omitempty" json:"capacity-mb,omitempty"`
 	// Only cache requests whose result set is small.
 	// +optional
-	AdmissionMaxResultMB *float64 `toml:"admission-max-result-mb" json:"admission-max-result-mb,omitempty"`
+	AdmissionMaxResultMB *float64 `toml:"admission-max-result-mb,omitempty" json:"admission-max-result-mb,omitempty"`
 	// Only cache requests takes notable time to process.
 	// +optional
-	AdmissionMinProcessMs *uint64 `toml:"admission-min-process-ms" json:"admission-min-process-ms,omitempty"`
+	AdmissionMinProcessMs *uint64 `toml:"admission-min-process-ms,omitempty" json:"admission-min-process-ms,omitempty"`
 }
 
 // Binlog is the config for binlog.
 // +k8s:openapi-gen=true
 type Binlog struct {
 	// optional
-	Enable *bool `toml:"enable" json:"enable,omitempty"`
+	Enable *bool `toml:"enable,omitempty" json:"enable,omitempty"`
 	// Optional: Defaults to 15s
 	// +optional
 	WriteTimeout *string `toml:"write-timeout,omitempty" json:"write-timeout,omitempty"`
@@ -472,7 +489,10 @@ type PessimisticTxn struct {
 type StmtSummary struct {
 	// Enable statement summary or not.
 	// +optional
-	Enable *bool `toml:"enable" json:"enable,omitempty"`
+	Enable *bool `toml:"enable,omitempty" json:"enable,omitempty"`
+	// Enable summary internal query.
+	// +optional
+	EnableInternalQuery *bool `toml:"enable-internal-query,omitempty" json:"enable-internal-query,omitempty"`
 	// The maximum number of statements kept in memory.
 	// Optional: Defaults to 100
 	// +optional
@@ -483,10 +503,10 @@ type StmtSummary struct {
 	MaxSQLLength *uint `toml:"max-sql-length,omitempty" json:"max-sql-length,omitempty"`
 	// The refresh interval of statement summary.
 	// +optional
-	RefreshInterval *int `toml:"refresh-interval" json:"refresh-interval,omitempty"`
+	RefreshInterval *int `toml:"refresh-interval,omitempty" json:"refresh-interval,omitempty"`
 	// The maximum history size of statement summary.
 	// +optional
-	HistorySize *int `toml:"history-size" json:"history-size,omitempty"`
+	HistorySize *int `toml:"history-size,omitempty" json:"history-size,omitempty"`
 }
 
 // IsolationRead is the config for isolation read.
@@ -495,7 +515,7 @@ type IsolationRead struct {
 	// Engines filters tidb-server access paths by engine type.
 	// imported from v3.1.0
 	// +optional
-	Engines []string `toml:"engines" json:"engines,omitempty"`
+	Engines []string `toml:"engines,omitempty" json:"engines,omitempty"`
 }
 
 // Experimental controls the features that are still experimental: their semantics, interfaces are subject to change.
@@ -505,5 +525,8 @@ type Experimental struct {
 	// Whether enable the syntax like `auto_random(3)` on the primary key column.
 	// imported from TiDB v3.1.0
 	// +optional
-	AllowAutoRandom *bool `toml:"allow-auto-random" json:"allow-auto-random,omitempty"`
+	AllowAutoRandom *bool `toml:"allow-auto-random,omitempty" json:"allow-auto-random,omitempty"`
+	// Whether enable creating expression index.
+	// +optional
+	AllowsExpressionIndex *bool `toml:"allow-expression-index,omitempty" json:"allow-expression-index,omitempty"`
 }

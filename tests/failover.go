@@ -61,6 +61,12 @@ func (oa *operatorActions) DeletePDDataThenCheckFailover(info *TidbClusterConfig
 	}
 	klog.Infof("delete pod %s/%s data successfully", ns, podName)
 
+	oldPD, err := oa.kubeCli.CoreV1().Pods(ns).Get(podName, metav1.GetOptions{})
+	if err != nil {
+		klog.Error(err)
+		return err
+	}
+	// first we ensured that pd failover new pod, and failure member/pod should be deleted.
 	err = wait.Poll(10*time.Second, failoverTimeout+pdFailoverPeriod, func() (bool, error) {
 		tc, err := oa.cli.PingcapV1alpha1().TidbClusters(ns).Get(tcName, metav1.GetOptions{})
 		if err != nil {
@@ -68,36 +74,61 @@ func (oa *operatorActions) DeletePDDataThenCheckFailover(info *TidbClusterConfig
 			return false, nil
 		}
 
+		// ensure oldPD is deleted
+		newPd, err := oa.kubeCli.CoreV1().Pods(ns).Get(podName, metav1.GetOptions{})
+		if err != nil {
+			klog.Error(err)
+			return false, nil
+		}
+		if string(oldPD.UID) == string(newPd.UID) {
+			klog.Infof("oldPD should be deleted and newPD should be created")
+			return false, nil
+		}
+
+		// ensure failure member has deleted state
 		if len(tc.Status.PD.FailureMembers) == 1 {
 			klog.Infof("%#v", tc.Status.PD.FailureMembers)
-			return true, nil
+			for _, failureMember := range tc.Status.PD.FailureMembers {
+				if failureMember.MemberDeleted {
+					return true, nil
+				}
+			}
 		}
 		return false, nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to check pd %s/%s failover", ns, podName)
 	}
-	klog.Infof("check pd %s/%s failover successfully", ns, podName)
+	klog.Infof("check pd pod %s/%s failover marked successfully, new pod verified", ns, podName)
 
+	// Then we ensure pd failover recovery
 	err = wait.Poll(5*time.Second, 5*time.Minute, func() (done bool, err error) {
 		tc, err := oa.cli.PingcapV1alpha1().TidbClusters(ns).Get(tcName, metav1.GetOptions{})
 		if err != nil {
-			klog.Error(err.Error())
+			klog.Error(err)
 			return false, nil
 		}
-		if tc.Status.PD.FailureMembers == nil || len(tc.Status.PD.FailureMembers) < 1 {
-			return true, nil
+
+		if tc.Status.PD.FailureMembers != nil && len(tc.Status.PD.FailureMembers) > 0 {
+			klog.Error("pd failover should empty failure members in recovery")
+			return false, nil
 		}
-		tc.Status.PD.FailureMembers = nil
-		tc, err = oa.cli.PingcapV1alpha1().TidbClusters(ns).Update(tc)
+		pdSpecReplicas := tc.Spec.PD.Replicas
+		pdsts, err := oa.kubeCli.AppsV1().StatefulSets(ns).Get(fmt.Sprintf("%s-pd", tc.Name), metav1.GetOptions{})
 		if err != nil {
-			klog.Error(err.Error())
+			klog.Error(err)
+			return false, nil
 		}
-		return false, nil
+		if *pdsts.Spec.Replicas != pdSpecReplicas {
+			klog.Errorf("pdsts replicas[%d] should equal pdspec replicas[%d]", pdSpecReplicas, *pdsts.Spec.Replicas)
+			return false, nil
+		}
+		return true, nil
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("check pd cluster %s/%s recovery failed after failover", ns, tcName)
 	}
+	klog.Infof("pd cluster have been recovered")
 
 	err = oa.CheckTidbClusterStatus(info)
 	if err != nil {
@@ -760,16 +791,19 @@ func (oa *operatorActions) CheckOneApiserverDownOrDie(operatorConfig *OperatorCo
 	KeepOrDie(3*time.Second, 10*time.Minute, func() error {
 		err := oa.CheckK8sAvailable(map[string]string{faultNode: faultNode}, affectedPods)
 		if err != nil {
+			klog.Errorf("CheckK8sAvailable Failed, err: %v", err)
 			return err
 		}
 		klog.V(4).Infof("k8s cluster is available.")
 		err = oa.CheckOperatorAvailable(operatorConfig)
 		if err != nil {
+			klog.Errorf("CheckOperatorAvailable Failed, err: %v", err)
 			return err
 		}
 		klog.V(4).Infof("tidb operator is available.")
 		err = oa.CheckTidbClustersAvailable(clusters)
 		if err != nil {
+			klog.Errorf("CheckTidbClustersAvailable Failed, err: %v", err)
 			return err
 		}
 		klog.V(4).Infof("all clusters is available")
@@ -808,7 +842,7 @@ func (oa *operatorActions) CheckK8sAvailableOrDie(excludeNodes map[string]string
 }
 
 func (oa *operatorActions) CheckK8sAvailable(excludeNodes map[string]string, excludePods map[string]*corev1.Pod) error {
-	return wait.Poll(3*time.Second, time.Minute, func() (bool, error) {
+	return wait.Poll(3*time.Second, 10*time.Minute, func() (bool, error) {
 		nodes, err := oa.kubeCli.CoreV1().Nodes().List(metav1.ListOptions{})
 		if err != nil {
 			klog.Errorf("failed to list nodes,error:%v", err)
@@ -820,7 +854,8 @@ func (oa *operatorActions) CheckK8sAvailable(excludeNodes map[string]string, exc
 			}
 			for _, condition := range node.Status.Conditions {
 				if condition.Type == corev1.NodeReady && condition.Status != corev1.ConditionTrue {
-					return false, fmt.Errorf("node: [%s] is not in running", node.GetName())
+					klog.Infof("node: [%s] is not in running", node.GetName())
+					return false, nil
 				}
 			}
 		}
@@ -835,7 +870,8 @@ func (oa *operatorActions) CheckK8sAvailable(excludeNodes map[string]string, exc
 			}
 			podState := GetPodStatus(&pod)
 			if podState != string(corev1.PodRunning) {
-				return false, fmt.Errorf("pod:[%s/%s] is unavailable,state is %s", pod.GetNamespace(), pod.GetName(), podState)
+				klog.Infof("pod:[%s/%s] is unavailable,state is %s", pod.GetNamespace(), pod.GetName(), podState)
+				return false, nil
 			}
 		}
 		return true, nil
