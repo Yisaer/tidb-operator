@@ -23,8 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
-	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned/fake"
-	informers "github.com/pingcap/tidb-operator/pkg/client/informers/externalversions"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/pkg/pdapi"
@@ -34,10 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	kubeinformers "k8s.io/client-go/informers"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/utils/pointer"
 )
 
 func TestTiFlashMemberManagerTiFlashStatefulSetIsUpgrading(t *testing.T) {
@@ -81,7 +78,7 @@ func TestTiFlashMemberManagerTiFlashStatefulSetIsUpgrading(t *testing.T) {
 			}
 			podIndexer.Add(pod)
 		}
-		b, err := pmm.tiflashStatefulSetIsUpgradingFn(pmm.podLister, pmm.pdControl, set, tc)
+		b, err := pmm.statefulSetIsUpgradingFn(pmm.deps.PodLister, pmm.deps.PDControl, set, tc)
 		if test.errExpectFn != nil {
 			test.errExpectFn(g, err)
 		}
@@ -478,6 +475,9 @@ func TestTiFlashMemberManagerSyncTidbClusterStatus(t *testing.T) {
 		tc := newTidbClusterForPD()
 		tc.Status.PD.Phase = v1alpha1.NormalPhase
 		set := &apps.StatefulSet{
+			Spec: apps.StatefulSetSpec{
+				Replicas: pointer.Int32Ptr(0),
+			},
 			Status: status,
 		}
 		if test.updateTC != nil {
@@ -486,7 +486,7 @@ func TestTiFlashMemberManagerSyncTidbClusterStatus(t *testing.T) {
 		pmm, _, _, pdClient, _, _ := newFakeTiFlashMemberManager(tc)
 
 		if test.upgradingFn != nil {
-			pmm.tiflashStatefulSetIsUpgradingFn = test.upgradingFn
+			pmm.statefulSetIsUpgradingFn = test.upgradingFn
 		}
 		if test.errWhenGetStores {
 			pdClient.AddReaction(pdapi.GetStoresActionType, func(action *pdapi.Action) (interface{}, error) {
@@ -1123,36 +1123,19 @@ func TestTiFlashMemberManagerSyncTidbClusterStatus(t *testing.T) {
 func newFakeTiFlashMemberManager(tc *v1alpha1.TidbCluster) (
 	*tiflashMemberManager, *controller.FakeStatefulSetControl,
 	*controller.FakeServiceControl, *pdapi.FakePDClient, cache.Indexer, cache.Indexer) {
-	cli := fake.NewSimpleClientset()
-	kubeCli := kubefake.NewSimpleClientset()
-	pdControl := pdapi.NewFakePDControl(kubeCli)
-	pdClient := controller.NewFakePDClient(pdControl, tc)
-	setInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Apps().V1().StatefulSets()
-	svcInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Services()
-	epsInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Endpoints()
-	tcInformer := informers.NewSharedInformerFactory(cli, 0).Pingcap().V1alpha1().TidbClusters()
-	setControl := controller.NewFakeStatefulSetControl(setInformer, tcInformer)
-	svcControl := controller.NewFakeServiceControl(svcInformer, epsInformer, tcInformer)
-	podInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Pods()
-	nodeInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Nodes()
-	tiflashScaler := NewFakeTiFlashScaler()
-	tiflashUpgrader := NewFakeTiFlashUpgrader()
-	genericControl := controller.NewFakeGenericControl()
-
+	fakeDeps := controller.NewFakeDependencies()
 	tmm := &tiflashMemberManager{
-		pdControl:       pdControl,
-		podLister:       podInformer.Lister(),
-		nodeLister:      nodeInformer.Lister(),
-		setControl:      setControl,
-		svcControl:      svcControl,
-		typedControl:    controller.NewTypedControl(genericControl),
-		setLister:       setInformer.Lister(),
-		svcLister:       svcInformer.Lister(),
-		tiflashScaler:   tiflashScaler,
-		tiflashUpgrader: tiflashUpgrader,
+		deps:                     fakeDeps,
+		scaler:                   NewFakeTiFlashScaler(),
+		upgrader:                 NewFakeTiFlashUpgrader(),
+		statefulSetIsUpgradingFn: tiflashStatefulSetIsUpgrading,
 	}
-	tmm.tiflashStatefulSetIsUpgradingFn = tiflashStatefulSetIsUpgrading
-	return tmm, setControl, svcControl, pdClient, podInformer.Informer().GetIndexer(), nodeInformer.Informer().GetIndexer()
+	pdClient := controller.NewFakePDClient(fakeDeps.PDControl.(*pdapi.FakePDControl), tc)
+	setControl := fakeDeps.StatefulSetControl.(*controller.FakeStatefulSetControl)
+	svcControl := fakeDeps.ServiceControl.(*controller.FakeServiceControl)
+	podIndexer := fakeDeps.KubeInformerFactory.Core().V1().Pods().Informer().GetIndexer()
+	nodeIndexer := fakeDeps.KubeInformerFactory.Core().V1().Nodes().Informer().GetIndexer()
+	return tmm, setControl, svcControl, pdClient, podIndexer, nodeIndexer
 }
 
 func TestGetNewServiceForTidbCluster(t *testing.T) {
@@ -1186,6 +1169,7 @@ func TestGetNewServiceForTidbCluster(t *testing.T) {
 						"app.kubernetes.io/managed-by": "tidb-operator",
 						"app.kubernetes.io/instance":   "foo",
 						"app.kubernetes.io/component":  "tiflash",
+						"app.kubernetes.io/used-by":    "peer",
 					},
 					OwnerReferences: []metav1.OwnerReference{
 						{
@@ -1261,6 +1245,10 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+
+					TiDB: &v1alpha1.TiDBSpec{},
+					PD:   &v1alpha1.PDSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: testHostNetwork(t, false, ""),
@@ -1287,6 +1275,9 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+					TiDB: &v1alpha1.TiDBSpec{},
+					PD:   &v1alpha1.PDSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: testHostNetwork(t, true, v1.DNSClusterFirstWithHostNet),
@@ -1299,7 +1290,7 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 					Namespace: "ns",
 				},
 				Spec: v1alpha1.TidbClusterSpec{
-					PD: v1alpha1.PDSpec{
+					PD: &v1alpha1.PDSpec{
 						ComponentSpec: v1alpha1.ComponentSpec{
 							HostNetwork: &enable,
 						},
@@ -1315,6 +1306,8 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+					TiDB: &v1alpha1.TiDBSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: testHostNetwork(t, false, ""),
@@ -1327,7 +1320,7 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 					Namespace: "ns",
 				},
 				Spec: v1alpha1.TidbClusterSpec{
-					TiDB: v1alpha1.TiDBSpec{
+					TiDB: &v1alpha1.TiDBSpec{
 						ComponentSpec: v1alpha1.ComponentSpec{
 							HostNetwork: &enable,
 						},
@@ -1343,6 +1336,8 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+					PD:   &v1alpha1.PDSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: testHostNetwork(t, false, ""),
@@ -1358,7 +1353,7 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 					},
 				},
 				Spec: v1alpha1.TidbClusterSpec{
-					TiDB: v1alpha1.TiDBSpec{},
+					TiDB: &v1alpha1.TiDBSpec{},
 					TiFlash: &v1alpha1.TiFlashSpec{
 						StorageClaims: []v1alpha1.StorageClaim{
 							{
@@ -1370,6 +1365,8 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+					PD:   &v1alpha1.PDSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: testAnnotations(t, map[string]string{"delete-slots": "[0,1]"}),
@@ -1407,6 +1404,9 @@ func TestGetNewTiFlashSetForTidbCluster(t *testing.T) {
 							},
 						},
 					},
+					TiDB: &v1alpha1.TiDBSpec{},
+					PD:   &v1alpha1.PDSpec{},
+					TiKV: &v1alpha1.TiKVSpec{},
 				},
 			},
 			testSts: func(sts *apps.StatefulSet) {

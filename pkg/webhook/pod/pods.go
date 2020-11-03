@@ -16,7 +16,6 @@ package pod
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
@@ -62,8 +61,7 @@ var (
 	AstsControllerServiceAccounts string
 )
 
-func NewPodAdmissionControl(kubeCli kubernetes.Interface, operatorCli versioned.Interface, PdControl pdapi.PDControlInterface, extraServiceAccounts []string, evictRegionLeaderTimeout time.Duration, recorder record.EventRecorder) *PodAdmissionControl {
-
+func NewPodAdmissionControl(kubeCli kubernetes.Interface, operatorCli versioned.Interface, PdControl pdapi.PDControlInterface, extraServiceAccounts []string, recorder record.EventRecorder) *PodAdmissionControl {
 	serviceAccounts := sets.NewString(stsControllerServiceAccounts)
 	for _, sa := range extraServiceAccounts {
 		serviceAccounts.Insert(sa)
@@ -71,7 +69,6 @@ func NewPodAdmissionControl(kubeCli kubernetes.Interface, operatorCli versioned.
 	if features.DefaultFeatureGate.Enabled(features.AdvancedStatefulSet) {
 		serviceAccounts.Insert(AstsControllerServiceAccounts)
 	}
-	EvictLeaderTimeout = evictRegionLeaderTimeout
 	return &PodAdmissionControl{
 		kubeCli:         kubeCli,
 		operatorCli:     operatorCli,
@@ -197,7 +194,12 @@ func (pc *PodAdmissionControl) admitDeletePods(name, namespace string) *admissio
 		pod:              pod,
 		tc:               tc,
 		ownerStatefulSet: ownerStatefulSet,
-		pdClient:         pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tcName, tc.IsTLSClusterEnabled()),
+	}
+
+	if tc.IsHeterogeneous() {
+		payload.pdClient = pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tc.Spec.Cluster.Name, tc.IsTLSClusterEnabled())
+	} else {
+		payload.pdClient = pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tcName, tc.IsTLSClusterEnabled())
 	}
 
 	if l.IsPD() {
@@ -257,7 +259,12 @@ func (pc *PodAdmissionControl) AdmitCreatePods(ar *admission.AdmissionRequest) *
 	}
 
 	if l.IsTiKV() {
-		pdClient := pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tcName, tc.IsTLSClusterEnabled())
+		var pdClient pdapi.PDClient
+		if tc.IsHeterogeneous() {
+			pdClient = pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tc.Spec.Cluster.Name, tc.IsTLSClusterEnabled())
+		} else {
+			pdClient = pc.pdControl.GetPDClient(pdapi.Namespace(namespace), tc.Name, tc.IsTLSClusterEnabled())
+		}
 		return pc.admitCreateTiKVPod(pod, tc, pdClient)
 	}
 

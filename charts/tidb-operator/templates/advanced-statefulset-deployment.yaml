@@ -24,6 +24,10 @@ spec:
         app.kubernetes.io/component: advanced-statefulset-controller
     spec:
       serviceAccountName: {{ .Values.advancedStatefulset.serviceAccount }}
+    {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+  {{ toYaml .Values.imagePullSecrets | indent 6 }}
+    {{- end }}
       containers:
       - name: advanced-statefulset-controller
         image: {{ .Values.advancedStatefulset.image }}
@@ -38,6 +42,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: TZ
+          value: {{ .Values.timezone | default "UTC" }}
         resources:
 {{ toYaml .Values.advancedStatefulset.resources | indent 12 }}
     {{- with .Values.advancedStatefulset.nodeSelector }}

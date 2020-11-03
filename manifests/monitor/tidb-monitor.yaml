@@ -23,7 +23,7 @@ spec:
       portName: http-prometheus 
   grafana:
     baseImage: grafana/grafana
-    version: 6.0.1
+    version: 6.1.6
     imagePullPolicy: IfNotPresent
     logLevel: info
     resources: {}
@@ -49,7 +49,7 @@ spec:
       portName: http-grafana
   initializer:
     baseImage: pingcap/tidb-monitor-initializer
-    version: v3.0.13
+    version: v4.0.0
     imagePullPolicy: Always
     resources: {}
     #  limits:

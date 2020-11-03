@@ -15,15 +15,22 @@ package member
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
+	"github.com/pingcap/tidb-operator/pkg/util"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/pointer"
+)
+
+const (
+	PdTlsCertPath = "/var/lib/pd-tls"
 )
 
 type TidbDiscoveryManager interface {
@@ -31,19 +38,23 @@ type TidbDiscoveryManager interface {
 }
 
 type realTidbDiscoveryManager struct {
-	ctrl controller.TypedControlInterface
+	deps *controller.Dependencies
 }
 
-func NewTidbDiscoveryManager(typedControl controller.TypedControlInterface) TidbDiscoveryManager {
-	return &realTidbDiscoveryManager{typedControl}
+func NewTidbDiscoveryManager(deps *controller.Dependencies) TidbDiscoveryManager {
+	return &realTidbDiscoveryManager{deps: deps}
 }
 
 func (m *realTidbDiscoveryManager) Reconcile(tc *v1alpha1.TidbCluster) error {
 
+	// If PD is not specified return
+	if tc.Spec.PD == nil {
+		return nil
+	}
 	meta, _ := getDiscoveryMeta(tc, controller.DiscoveryMemberName)
 
 	// Ensure RBAC
-	_, err := m.ctrl.CreateOrUpdateRole(tc, &rbacv1.Role{
+	_, err := m.deps.TypedControl.CreateOrUpdateRole(tc, &rbacv1.Role{
 		ObjectMeta: meta,
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -62,13 +73,13 @@ func (m *realTidbDiscoveryManager) Reconcile(tc *v1alpha1.TidbCluster) error {
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery role: %v", err)
 	}
-	_, err = m.ctrl.CreateOrUpdateServiceAccount(tc, &corev1.ServiceAccount{
+	_, err = m.deps.TypedControl.CreateOrUpdateServiceAccount(tc, &corev1.ServiceAccount{
 		ObjectMeta: meta,
 	})
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery serviceaccount: %v", err)
 	}
-	_, err = m.ctrl.CreateOrUpdateRoleBinding(tc, &rbacv1.RoleBinding{
+	_, err = m.deps.TypedControl.CreateOrUpdateRoleBinding(tc, &rbacv1.RoleBinding{
 		ObjectMeta: meta,
 		Subjects: []rbacv1.Subject{{
 			Kind: rbacv1.ServiceAccountKind,
@@ -83,16 +94,16 @@ func (m *realTidbDiscoveryManager) Reconcile(tc *v1alpha1.TidbCluster) error {
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery rolebinding: %v", err)
 	}
-	d, err := getTidbDiscoveryDeployment(tc)
+	d, err := m.getTidbDiscoveryDeployment(tc)
 	if err != nil {
 		return controller.RequeueErrorf("error generating discovery deployment: %v", err)
 	}
-	deploy, err := m.ctrl.CreateOrUpdateDeployment(tc, d)
+	deploy, err := m.deps.TypedControl.CreateOrUpdateDeployment(tc, d)
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery service: %v", err)
 	}
 	// RBAC ensured, reconcile
-	_, err = m.ctrl.CreateOrUpdateService(tc, getTidbDiscoveryService(tc, deploy))
+	_, err = m.deps.TypedControl.CreateOrUpdateService(tc, getTidbDiscoveryService(tc, deploy))
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery service: %v", err)
 	}
@@ -105,23 +116,32 @@ func getTidbDiscoveryService(tc *v1alpha1.TidbCluster, deploy *appsv1.Deployment
 		ObjectMeta: meta,
 		Spec: corev1.ServiceSpec{
 			Type: corev1.ServiceTypeClusterIP,
-			Ports: []corev1.ServicePort{{
-				Name:       "discovery",
-				Port:       10261,
-				TargetPort: intstr.FromInt(10261),
-				Protocol:   corev1.ProtocolTCP,
-			}},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "discovery",
+					Port:       10261,
+					TargetPort: intstr.FromInt(10261),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "proxy",
+					Port:       10262,
+					TargetPort: intstr.FromInt(10262),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
 			Selector: deploy.Spec.Template.Labels,
 		},
 	}
 }
 
-func getTidbDiscoveryDeployment(tc *v1alpha1.TidbCluster) (*appsv1.Deployment, error) {
+func (m *realTidbDiscoveryManager) getTidbDiscoveryDeployment(tc *v1alpha1.TidbCluster) (*appsv1.Deployment, error) {
 	meta, l := getDiscoveryMeta(tc, controller.DiscoveryMemberName)
 	d := &appsv1.Deployment{
 		ObjectMeta: meta,
 		Spec: appsv1.DeploymentSpec{
-			Replicas: controller.Int32Ptr(1),
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			Replicas: pointer.Int32Ptr(1),
 			Selector: l.LabelSelector(),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -135,7 +155,7 @@ func getTidbDiscoveryDeployment(tc *v1alpha1.TidbCluster) (*appsv1.Deployment, e
 						Command: []string{
 							"/usr/local/bin/tidb-discovery",
 						},
-						Image:           controller.TidbDiscoveryImage,
+						Image:           m.deps.CLIConfig.TiDBDiscoveryImage,
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Env: []corev1.EnvVar{
 							{
@@ -150,11 +170,38 @@ func getTidbDiscoveryDeployment(tc *v1alpha1.TidbCluster) (*appsv1.Deployment, e
 								Name:  "TZ",
 								Value: tc.Timezone(),
 							},
+							{
+								Name:  "TC_NAME",
+								Value: tc.Name,
+							},
 						},
 					}},
 				},
 			},
 		},
+	}
+	if tc.IsTLSClusterEnabled() {
+		d.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "pd-tls",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: util.ClusterTLSSecretName(tc.Name, label.PDLabelVal),
+					},
+				},
+			},
+		}
+		d.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
+			{
+				Name:      "pd-tls",
+				ReadOnly:  true,
+				MountPath: PdTlsCertPath,
+			},
+		}
+		d.Spec.Template.Spec.Containers[0].Env = append(d.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{
+			Name:  "TC_TLS_ENABLED",
+			Value: strconv.FormatBool(true),
+		})
 	}
 	b, err := json.Marshal(d.Spec.Template.Spec)
 	if err != nil {
@@ -164,6 +211,10 @@ func getTidbDiscoveryDeployment(tc *v1alpha1.TidbCluster) (*appsv1.Deployment, e
 		d.Annotations = map[string]string{}
 	}
 	d.Annotations[controller.LastAppliedPodTemplate] = string(b)
+
+	if tc.Spec.ImagePullSecrets != nil {
+		d.Spec.Template.Spec.ImagePullSecrets = tc.Spec.ImagePullSecrets
+	}
 	return d, nil
 }
 
@@ -188,13 +239,13 @@ func NewFakeDiscoveryManger() *FakeDiscoveryManager {
 	return &FakeDiscoveryManager{}
 }
 
-func (fdm *FakeDiscoveryManager) SetReconcileError(err error) {
-	fdm.err = err
+func (m *FakeDiscoveryManager) SetReconcileError(err error) {
+	m.err = err
 }
 
-func (fdm *FakeDiscoveryManager) Reconcile(_ *v1alpha1.TidbCluster) error {
-	if fdm.err != nil {
-		return fdm.err
+func (m *FakeDiscoveryManager) Reconcile(_ *v1alpha1.TidbCluster) error {
+	if m.err != nil {
+		return m.err
 	}
 	return nil
 }

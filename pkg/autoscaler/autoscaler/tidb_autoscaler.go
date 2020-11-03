@@ -24,6 +24,7 @@ import (
 	operatorUtils "github.com/pingcap/tidb-operator/pkg/util"
 	promClient "github.com/prometheus/client_golang/api"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
 
@@ -34,7 +35,7 @@ func (am *autoScalerManager) syncTiDB(tc *v1alpha1.TidbCluster, tac *v1alpha1.Ti
 	if tac.Status.TiDB == nil {
 		tac.Status.TiDB = &v1alpha1.TidbAutoScalerStatus{}
 	}
-	sts, err := am.stsLister.StatefulSets(tc.Namespace).Get(operatorUtils.GetStatefulSetName(tc, v1alpha1.TiDBMemberType))
+	sts, err := am.deps.StatefulSetLister.StatefulSets(tc.Namespace).Get(operatorUtils.GetStatefulSetName(tc, v1alpha1.TiDBMemberType))
 	if err != nil {
 		return err
 	}
@@ -49,7 +50,7 @@ func (am *autoScalerManager) syncTiDB(tc *v1alpha1.TidbCluster, tac *v1alpha1.Ti
 			return err
 		}
 	} else {
-		targetReplicas, err = query.ExternalService(tc, v1alpha1.TiDBMemberType, tac.Spec.TiDB.ExternalEndpoint, am.kubecli)
+		targetReplicas, err = query.ExternalService(tc, v1alpha1.TiDBMemberType, tac.Spec.TiDB.ExternalEndpoint, am.deps.KubeClientset)
 		if err != nil {
 			klog.Errorf("tac[%s/%s] 's query to the external endpoint got error: %v", tac.Namespace, tac.Name, err)
 			return err
@@ -84,7 +85,7 @@ func syncTiDBAfterCalculated(tc *v1alpha1.TidbCluster, tac *v1alpha1.TidbCluster
 func updateTcTiDBIfScale(tc *v1alpha1.TidbCluster, tac *v1alpha1.TidbClusterAutoScaler, recommendedReplicas int32) error {
 	tac.Annotations[label.AnnTiDBLastAutoScalingTimestamp] = fmt.Sprintf("%d", time.Now().Unix())
 	tc.Spec.TiDB.Replicas = recommendedReplicas
-	tac.Status.TiDB.RecommendedReplicas = &recommendedReplicas
+	tac.Status.TiDB.RecommendedReplicas = recommendedReplicas
 	return nil
 }
 
@@ -97,29 +98,21 @@ func calculateTidbMetrics(tac *v1alpha1.TidbClusterAutoScaler, sts *appsv1.State
 	if err != nil {
 		return -1, err
 	}
-	metric := calculate.FilterMetrics(tac.Spec.TiDB.Metrics)
-	mType, err := calculate.GenMetricType(tac, metric)
-	if err != nil {
-		return -1, err
-	}
 	duration, err := time.ParseDuration(*tac.Spec.TiDB.MetricsTimeDuration)
 	if err != nil {
 		return -1, err
 	}
-	sq := &calculate.SingleQuery{
-		Endpoint:  ep,
-		Timestamp: time.Now().Unix(),
-		Instances: instances,
-		Metric:    metric,
-		Quary:     fmt.Sprintf(calculate.TidbSumCpuMetricsPattern, tac.Spec.Cluster.Name, *tac.Spec.TiDB.MetricsTimeDuration),
+	metrics := calculate.FilterMetrics(tac.Spec.TiDB.Metrics, corev1.ResourceCPU)
+	if len(metrics) > 0 {
+		sq := &calculate.SingleQuery{
+			Endpoint:  ep,
+			Timestamp: time.Now().Unix(),
+			Instances: instances,
+			Query:     fmt.Sprintf(calculate.TidbSumCpuMetricsPattern, tac.Spec.Cluster.Name, *tac.Spec.TiDB.MetricsTimeDuration),
+		}
+		return calculate.CalculateRecomendedReplicasByCpuCosts(tac, sq, sts, client, v1alpha1.TiDBMemberType, duration, metrics[0].MetricSpec)
 	}
-
-	switch mType {
-	case calculate.MetricTypeCPU:
-		return calculate.CalculateRecomendedReplicasByCpuCosts(tac, sq, sts, client, v1alpha1.TiDBMemberType, duration)
-	default:
-		return -1, fmt.Errorf(calculate.InvalidTacMetricConfigureMsg, tac.Namespace, tac.Name)
-	}
+	return -1, fmt.Errorf(calculate.InvalidTacMetricConfigureMsg, tac.Namespace, tac.Name)
 }
 
 func filterTidbInstances(tc *v1alpha1.TidbCluster) []string {

@@ -38,7 +38,7 @@ services:
     type: ClusterIP
 
 discovery:
-  image: pingcap/tidb-operator:v1.1.0
+  image: pingcap/tidb-operator:v1.1.6
   imagePullPolicy: IfNotPresent
   resources:
     limits:
@@ -108,7 +108,7 @@ pd:
     # annotations: {} "<the default name will be used>"
     # portName: "client"
   replicas: 3
-  image: pingcap/pd:v3.0.13
+  image: pingcap/pd:v4.0.7
   # storageClassName is a StorageClass provides a way for administrators to describe the "classes" of storage they offer.
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
@@ -255,7 +255,7 @@ tikv:
   # we can only set capacity in tikv.resources.limits.storage.
 
   replicas: 3
-  image: pingcap/tikv:v3.0.13
+  image: pingcap/tikv:v4.0.7
   # storageClassName is a StorageClass provides a way for administrators to describe the "classes" of storage they offer.
   # different classes might map to quality-of-service levels, or to backup policies,
   # or to arbitrary policies determined by the cluster administrators.
@@ -352,7 +352,7 @@ tidb:
   # initSqlConfigMapName: tidb-initsql
   # initSql: |-
   #   create database app;
-  image: pingcap/tidb:v3.0.13
+  image: pingcap/tidb:v4.0.7
   # Image pull policy.
   imagePullPolicy: IfNotPresent
 
@@ -463,7 +463,7 @@ tidb:
     # the start argument to specify the folder containing
     directory: /plugins
     # the start argument to specify the plugin id (name "-" version) that needs to be loaded, e.g. 'conn_limit-1'.
-    list: ["whitelist-1"]
+    list: ["allowlist-1"]
 
   # Whether enable TLS connection between TiDB server and MySQL client.
   # https://pingcap.com/docs/stable/how-to/secure/enable-tls-clients/
@@ -506,7 +506,7 @@ monitor:
   storageClassName: local-storage
   storage: 10Gi
   initializer:
-    image: pingcap/tidb-monitor-initializer:v3.0.13
+    image: pingcap/tidb-monitor-initializer:v4.0.7
     imagePullPolicy: IfNotPresent
     config:
       K8S_PROMETHEUS_URL: http://prometheus-k8s.monitoring.svc:9090
@@ -533,7 +533,7 @@ monitor:
       #  memory: 64Mi
   grafana:
     create: true
-    image: grafana/grafana:6.0.1
+    image: grafana/grafana:6.1.6
     imagePullPolicy: IfNotPresent
     logLevel: info
     resources:
@@ -573,6 +573,11 @@ monitor:
       portName: http-prometheus
     reserveDays: 12
     # alertmanagerURL: ""
+
+    # alertManagerRulesVersion is the version of the tidb cluster that used for alert rules.
+    # default to current tidb cluster version, for example: v3.0.15
+    #
+    # alertManagerRulesVersion: ""
   nodeSelector: {}
     # kind: monitor
     # zone: cn-bj1-01,cn-bj1-02
@@ -587,7 +592,7 @@ binlog:
   pump:
     create: false
     replicas: 1
-    image: pingcap/tidb-binlog:v3.0.13
+    image: pingcap/tidb-binlog:v4.0.7
     imagePullPolicy: IfNotPresent
     logLevel: info
     # storageClassName is a StorageClass provides a way for administrators to describe the "classes" of storage they offer.
@@ -656,7 +661,7 @@ binlog:
 
   drainer:
     create: false
-    image: pingcap/tidb-binlog:v3.0.13
+    image: pingcap/tidb-binlog:v4.0.7
     imagePullPolicy: IfNotPresent
     logLevel: info
     # storageClassName is a StorageClass provides a way for administrators to describe the "classes" of storage they offer.
@@ -676,7 +681,7 @@ binlog:
     workerCount: 16
     # the interval time (in seconds) of detect pumps' status (default 10)
     detectInterval: 10
-    # disbale detect causality
+    # disable detect causality
     disableDetect: false
     # disable dispatching sqls that in one same binlog; if set true, work-count and txn-batch would be useless
     disableDispatch: false
@@ -821,7 +826,7 @@ scheduledBackup:
 
 importer:
   create: false
-  image: pingcap/tidb-lightning:v3.0.13
+  image: pingcap/tidb-lightning:v4.0.7
   imagePullPolicy: IfNotPresent
   storageClassName: local-storage
   storage: 200Gi

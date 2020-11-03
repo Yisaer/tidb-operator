@@ -46,31 +46,31 @@ func NewDefaultTidbClusterControl(
 	metaManager manager.Manager,
 	orphanPodsCleaner member.OrphanPodsCleaner,
 	pvcCleaner member.PVCCleanerInterface,
+	pvcResizer member.PVCResizerInterface,
 	pumpMemberManager manager.Manager,
 	tiflashMemberManager manager.Manager,
 	ticdcMemberManager manager.Manager,
 	discoveryManager member.TidbDiscoveryManager,
 	tidbClusterStatusManager manager.Manager,
-	podRestarter member.PodRestarter,
 	conditionUpdater TidbClusterConditionUpdater,
 	recorder record.EventRecorder) ControlInterface {
 	return &defaultTidbClusterControl{
-		tcControl,
-		pdMemberManager,
-		tikvMemberManager,
-		tidbMemberManager,
-		reclaimPolicyManager,
-		metaManager,
-		orphanPodsCleaner,
-		pvcCleaner,
-		pumpMemberManager,
-		tiflashMemberManager,
-		ticdcMemberManager,
-		discoveryManager,
-		tidbClusterStatusManager,
-		podRestarter,
-		conditionUpdater,
-		recorder,
+		tcControl:                tcControl,
+		pdMemberManager:          pdMemberManager,
+		tikvMemberManager:        tikvMemberManager,
+		tidbMemberManager:        tidbMemberManager,
+		reclaimPolicyManager:     reclaimPolicyManager,
+		metaManager:              metaManager,
+		orphanPodsCleaner:        orphanPodsCleaner,
+		pvcCleaner:               pvcCleaner,
+		pvcResizer:               pvcResizer,
+		pumpMemberManager:        pumpMemberManager,
+		tiflashMemberManager:     tiflashMemberManager,
+		ticdcMemberManager:       ticdcMemberManager,
+		discoveryManager:         discoveryManager,
+		tidbClusterStatusManager: tidbClusterStatusManager,
+		conditionUpdater:         conditionUpdater,
+		recorder:                 recorder,
 	}
 }
 
@@ -83,77 +83,78 @@ type defaultTidbClusterControl struct {
 	metaManager              manager.Manager
 	orphanPodsCleaner        member.OrphanPodsCleaner
 	pvcCleaner               member.PVCCleanerInterface
+	pvcResizer               member.PVCResizerInterface
 	pumpMemberManager        manager.Manager
 	tiflashMemberManager     manager.Manager
 	ticdcMemberManager       manager.Manager
 	discoveryManager         member.TidbDiscoveryManager
 	tidbClusterStatusManager manager.Manager
-	podRestarter             member.PodRestarter
 	conditionUpdater         TidbClusterConditionUpdater
 	recorder                 record.EventRecorder
 }
 
 // UpdateStatefulSet executes the core logic loop for a tidbcluster.
-func (tcc *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster) error {
-	tcc.defaulting(tc)
-	if !tcc.validate(tc) {
+func (c *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster) error {
+	c.defaulting(tc)
+	if !c.validate(tc) {
 		return nil // fatal error, no need to retry on invalid object
 	}
 
 	var errs []error
 	oldStatus := tc.Status.DeepCopy()
 
-	if err := tcc.updateTidbCluster(tc); err != nil {
+	if err := c.updateTidbCluster(tc); err != nil {
 		errs = append(errs, err)
 	}
 
-	if err := tcc.conditionUpdater.Update(tc); err != nil {
+	if err := c.conditionUpdater.Update(tc); err != nil {
 		errs = append(errs, err)
 	}
 
 	if apiequality.Semantic.DeepEqual(&tc.Status, oldStatus) {
 		return errorutils.NewAggregate(errs)
 	}
-	if _, err := tcc.tcControl.UpdateTidbCluster(tc.DeepCopy(), &tc.Status, oldStatus); err != nil {
+	if _, err := c.tcControl.UpdateTidbCluster(tc.DeepCopy(), &tc.Status, oldStatus); err != nil {
 		errs = append(errs, err)
 	}
 
 	return errorutils.NewAggregate(errs)
 }
 
-func (tcc *defaultTidbClusterControl) validate(tc *v1alpha1.TidbCluster) bool {
+func (c *defaultTidbClusterControl) validate(tc *v1alpha1.TidbCluster) bool {
 	errs := v1alpha1validation.ValidateTidbCluster(tc)
 	if len(errs) > 0 {
 		aggregatedErr := errs.ToAggregate()
 		klog.Errorf("tidb cluster %s/%s is not valid and must be fixed first, aggregated error: %v", tc.GetNamespace(), tc.GetName(), aggregatedErr)
-		tcc.recorder.Event(tc, v1.EventTypeWarning, "FailedValidation", aggregatedErr.Error())
+		c.recorder.Event(tc, v1.EventTypeWarning, "FailedValidation", aggregatedErr.Error())
 		return false
 	}
 	return true
 }
 
-func (tcc *defaultTidbClusterControl) defaulting(tc *v1alpha1.TidbCluster) {
+func (c *defaultTidbClusterControl) defaulting(tc *v1alpha1.TidbCluster) {
 	defaulting.SetTidbClusterDefault(tc)
 }
 
-func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) error {
+func (c *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) error {
 	// syncing all PVs managed by operator's reclaim policy to Retain
-	if err := tcc.reclaimPolicyManager.Sync(tc); err != nil {
+	if err := c.reclaimPolicyManager.Sync(tc); err != nil {
 		return err
 	}
 
 	// cleaning all orphan pods(pd, tikv or tiflash which don't have a related PVC) managed by operator
-	if _, err := tcc.orphanPodsCleaner.Clean(tc); err != nil {
+	skipReasons, err := c.orphanPodsCleaner.Clean(tc)
+	if err != nil {
 		return err
+	}
+	if klog.V(10) {
+		for podName, reason := range skipReasons {
+			klog.Infof("pod %s of cluster %s/%s is skipped, reason %q", podName, tc.Namespace, tc.Name, reason)
+		}
 	}
 
 	// reconcile TiDB discovery service
-	if err := tcc.discoveryManager.Reconcile(tc); err != nil {
-		return err
-	}
-
-	// sync all the pods which need to be restarted
-	if err := tcc.podRestarter.Sync(tc); err != nil {
+	if err := c.discoveryManager.Reconcile(tc); err != nil {
 		return err
 	}
 
@@ -168,7 +169,7 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - upgrade the pd cluster
 	//   - scale out/in the pd cluster
 	//   - failover the pd cluster
-	if err := tcc.pdMemberManager.Sync(tc); err != nil {
+	if err := c.pdMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
@@ -181,12 +182,12 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - upgrade the tikv cluster
 	//   - scale out/in the tikv cluster
 	//   - failover the tikv cluster
-	if err := tcc.tikvMemberManager.Sync(tc); err != nil {
+	if err := c.tikvMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
 	// syncing the pump cluster
-	if err := tcc.pumpMemberManager.Sync(tc); err != nil {
+	if err := c.pumpMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
@@ -198,7 +199,7 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - upgrade the tidb cluster
 	//   - scale out/in the tidb cluster
 	//   - failover the tidb cluster
-	if err := tcc.tidbMemberManager.Sync(tc); err != nil {
+	if err := c.tidbMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
@@ -211,14 +212,14 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - upgrade the tiflash cluster
 	//   - scale out/in the tiflash cluster
 	//   - failover the tiflash cluster
-	if err := tcc.tiflashMemberManager.Sync(tc); err != nil {
+	if err := c.tiflashMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
 	//   - waiting for the pd cluster available(pd cluster is in quorum)
 	//   - create or update ticdc deployment
 	//   - sync ticdc cluster status from pd to TidbCluster object
-	if err := tcc.ticdcMemberManager.Sync(tc); err != nil {
+	if err := c.ticdcMemberManager.Sync(tc); err != nil {
 		return err
 	}
 
@@ -226,18 +227,29 @@ func (tcc *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster
 	//   - label.StoreIDLabelKey
 	//   - label.MemberIDLabelKey
 	//   - label.NamespaceLabelKey
-	if err := tcc.metaManager.Sync(tc); err != nil {
+	if err := c.metaManager.Sync(tc); err != nil {
 		return err
 	}
 
 	// cleaning the pod scheduling annotation for pd and tikv
-	if _, err := tcc.pvcCleaner.Clean(tc); err != nil {
+	pvcSkipReasons, err := c.pvcCleaner.Clean(tc)
+	if err != nil {
+		return err
+	}
+	if klog.V(10) {
+		for pvcName, reason := range pvcSkipReasons {
+			klog.Infof("pvc %s of cluster %s/%s is skipped, reason %q", pvcName, tc.Namespace, tc.Name, reason)
+		}
+	}
+
+	// resize PVC if necessary
+	if err := c.pvcResizer.Resize(tc); err != nil {
 		return err
 	}
 
 	// syncing the some tidbcluster status attributes
 	// 	- sync tidbmonitor reference
-	return tcc.tidbClusterStatusManager.Sync(tc)
+	return c.tidbClusterStatusManager.Sync(tc)
 }
 
 var _ ControlInterface = &defaultTidbClusterControl{}
@@ -250,13 +262,13 @@ func NewFakeTidbClusterControlInterface() *FakeTidbClusterControlInterface {
 	return &FakeTidbClusterControlInterface{}
 }
 
-func (ftcc *FakeTidbClusterControlInterface) SetUpdateTCError(err error) {
-	ftcc.err = err
+func (c *FakeTidbClusterControlInterface) SetUpdateTCError(err error) {
+	c.err = err
 }
 
-func (ftcc *FakeTidbClusterControlInterface) UpdateTidbCluster(_ *v1alpha1.TidbCluster) error {
-	if ftcc.err != nil {
-		return ftcc.err
+func (c *FakeTidbClusterControlInterface) UpdateTidbCluster(_ *v1alpha1.TidbCluster) error {
+	if c.err != nil {
+		return c.err
 	}
 	return nil
 }

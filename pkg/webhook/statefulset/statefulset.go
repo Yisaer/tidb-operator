@@ -14,12 +14,10 @@
 package statefulset
 
 import (
-	"errors"
 	"fmt"
-	"k8s.io/klog"
 	"strconv"
 
-	asappsv1 "github.com/pingcap/advanced-statefulset/client/apis/apps/v1"
+	asapps "github.com/pingcap/advanced-statefulset/client/apis/apps/v1"
 	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/features"
@@ -29,15 +27,12 @@ import (
 	apps "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
 )
 
 var (
-	deserializer runtime.Decoder
+	deserializer runtime.Decoder = util.Codecs.UniversalDeserializer()
 )
-
-func init() {
-	deserializer = util.GetCodec()
-}
 
 type StatefulSetAdmissionControl struct {
 	// operator client interface
@@ -56,14 +51,14 @@ func (sc *StatefulSetAdmissionControl) AdmitStatefulSets(ar *admission.Admission
 	namespace := ar.Namespace
 	expectedGroup := "apps"
 	if features.DefaultFeatureGate.Enabled(features.AdvancedStatefulSet) {
-		expectedGroup = asappsv1.GroupName
+		expectedGroup = asapps.GroupName
 	}
 	apiVersion := ar.Resource.Version
 	setResource := metav1.GroupVersionResource{Group: expectedGroup, Version: apiVersion, Resource: "statefulsets"}
 
 	klog.Infof("admit %s [%s/%s]", setResource, namespace, name)
 
-	stsObjectMeta, stsPartition, err := getStsAttributes(ar.OldObject.Raw)
+	stsObjectMeta, stsPartition, err := getStsAttributes(ar.Object.Raw)
 	if err != nil {
 		err = fmt.Errorf("statefulset %s/%s, decode request failed, err: %v", namespace, name, err)
 		klog.Error(err)
@@ -89,15 +84,15 @@ func (sc *StatefulSetAdmissionControl) AdmitStatefulSets(ar *admission.Admission
 	tc, err := sc.operatorCli.PingcapV1alpha1().TidbClusters(namespace).Get(tcName, metav1.GetOptions{})
 	if err != nil {
 		err := fmt.Errorf("get tidbcluster %s/%s failed, statefulset %s, err %v", namespace, tcName, name, err)
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 		return util.ARFail(err)
 	}
 
-	var partitionStr string
-	partitionStr = tc.Annotations[label.AnnTiDBPartition]
+	annKey := label.AnnTiDBPartition
 	if l.IsTiKV() {
-		partitionStr = tc.Annotations[label.AnnTiKVPartition]
+		annKey = label.AnnTiKVPartition
 	}
+	partitionStr := tc.Annotations[annKey]
 
 	if len(partitionStr) == 0 {
 		return util.ARSuccess()
@@ -106,14 +101,15 @@ func (sc *StatefulSetAdmissionControl) AdmitStatefulSets(ar *admission.Admission
 	partition, err := strconv.ParseInt(partitionStr, 10, 32)
 	if err != nil {
 		err := fmt.Errorf("statefulset %s/%s, convert partition str %s to int failed, err: %v", namespace, name, partitionStr, err)
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 		return util.ARFail(err)
 	}
 
 	if stsPartition != nil {
-		if *stsPartition > 0 && *stsPartition <= int32(partition) {
-			klog.Infof("statefulset %s/%s has been protect by partition %s annotations", namespace, name, partitionStr)
-			return util.ARFail(errors.New("protect by partition annotation"))
+		// only [partition from tc, INT32_MAX] are allowed
+		if *stsPartition < int32(partition) {
+			klog.Infof("statefulset %s/%s has been protected by partition annotation %q", namespace, name, partitionStr)
+			return util.ARFail(fmt.Errorf("protected by partition annotation (%s = %s) on the tidb cluster %s/%s", annKey, partitionStr, namespace, tcName))
 		}
 		klog.Infof("admit statefulset %s/%s update partition to %d, protect partition is %d", namespace, name, *stsPartition, partition)
 	}
@@ -121,7 +117,17 @@ func (sc *StatefulSetAdmissionControl) AdmitStatefulSets(ar *admission.Admission
 }
 
 func getStsAttributes(data []byte) (*metav1.ObjectMeta, *int32, error) {
-	set := apps.StatefulSet{}
+	if !features.DefaultFeatureGate.Enabled(features.AdvancedStatefulSet) {
+		set := apps.StatefulSet{}
+		if _, _, err := deserializer.Decode(data, nil, &set); err != nil {
+			return nil, nil, err
+		}
+		if set.Spec.UpdateStrategy.RollingUpdate != nil {
+			return &(set.ObjectMeta), set.Spec.UpdateStrategy.RollingUpdate.Partition, nil
+		}
+		return &(set.ObjectMeta), nil, nil
+	}
+	set := asapps.StatefulSet{}
 	if _, _, err := deserializer.Decode(data, nil, &set); err != nil {
 		return nil, nil, err
 	}

@@ -72,6 +72,8 @@ func UpdateBackupCondition(status *BackupStatus, condition *BackupCondition) boo
 	// Try to find this Backup condition.
 	conditionIndex, oldCondition := GetBackupCondition(status, condition.Type)
 
+	status.Phase = condition.Type
+
 	if oldCondition == nil {
 		// We are adding new Backup condition.
 		status.Conditions = append(status.Conditions, *condition)
@@ -120,4 +122,19 @@ func IsBackupScheduled(backup *Backup) bool {
 func IsBackupClean(backup *Backup) bool {
 	_, condition := GetBackupCondition(&backup.Status, BackupClean)
 	return condition != nil && condition.Status == corev1.ConditionTrue
+}
+
+// IsCleanCandidate returns true if a Backup should be added to clean candidate according to cleanPolicy
+func IsCleanCandidate(backup *Backup) bool {
+	switch backup.Spec.CleanPolicy {
+	case CleanPolicyTypeDelete, CleanPolicyTypeOnFailure:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeedNotClean returns true if a Backup need not to be cleaned up according to cleanPolicy
+func NeedNotClean(backup *Backup) bool {
+	return backup.Spec.CleanPolicy == CleanPolicyTypeOnFailure && !IsBackupFailed(backup)
 }

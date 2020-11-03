@@ -12,6 +12,7 @@ spec:
   backupTemplate:
     #backupType: full
     # serviceAccount: myServiceAccount
+    # cleanPolicy: OnFailure
     br:
       cluster: myCluster
       sendCredToTikv: true

@@ -38,7 +38,9 @@ const (
 
 	// NamespaceLabelKey is label key used in PV for easy querying
 	NamespaceLabelKey string = "app.kubernetes.io/namespace"
-
+	// UsedByLabelKey indicate where it is used. for example, tidb has two services,
+	// one for internal component access and the other for end-user
+	UsedByLabelKey string = "app.kubernetes.io/used-by"
 	// ClusterIDLabelKey is cluster id label key
 	ClusterIDLabelKey string = "tidb.pingcap.com/cluster-id"
 	// StoreIDLabelKey is store id label key
@@ -85,8 +87,6 @@ const (
 	AnnSysctlInit = "tidb.pingcap.com/sysctl-init"
 	// AnnEvictLeaderBeginTime is pod annotation key to indicate the begin time for evicting region leader
 	AnnEvictLeaderBeginTime = "tidb.pingcap.com/evictLeaderBeginTime"
-	// AnnPodDeferDeleting is pod annotation key to indicate the pod which need to be restarted
-	AnnPodDeferDeleting = "tidb.pingcap.com/pod-defer-deleting"
 	// AnnStsSyncTimestamp is sts annotation key to indicate the last timestamp the operator sync the sts
 	AnnStsLastSyncTimestamp = "tidb.pingcap.com/sync-timestamp"
 
@@ -108,25 +108,9 @@ const (
 	AnnTiDBLastAutoScalingTimestamp = "tidb.tidb.pingcap.com/last-autoscaling-timestamp"
 	// AnnTiKVLastAutoScalingTimestamp is annotation key of tidbclusterto which ordinal is created by tikv auto-scaling
 	AnnTiKVLastAutoScalingTimestamp = "tikv.tidb.pingcap.com/last-autoscaling-timestamp"
-
-	// AnnTiKVReadyToScaleTimestamp records timestamp when tikv ready to scale
-	AnnTiKVReadyToScaleTimestamp = "tikv.tidb.pingcap.com/ready-to-scale-timestamp"
-
 	// AnnLastSyncingTimestamp records last sync timestamp
 	AnnLastSyncingTimestamp = "tidb.pingcap.com/last-syncing-timestamp"
 
-	// AnnTiDBConsecutiveScaleOutCount describes the least consecutive count to scale-out for tidb
-	AnnTiDBConsecutiveScaleOutCount = "tidb.tidb.pingcap.com/consecutive-scale-out-count"
-	// AnnTiDBConsecutiveScaleInCount describes the least consecutive count to scale-in for tidb
-	AnnTiDBConsecutiveScaleInCount = "tidb.tidb.pingcap.com/consecutive-scale-in-count"
-	// AnnTiKVConsecutiveScaleOutCount describes the least consecutive count to scale-out for tikv
-	AnnTiKVConsecutiveScaleOutCount = "tikv.tidb.pingcap.com/consecutive-scale-out-count"
-	// AnnTiKVConsecutiveScaleInCount describes the least consecutive count to scale-in for tikv
-	AnnTiKVConsecutiveScaleInCount = "tikv.tidb.pingcap.com/consecutive-scale-in-count"
-	// AnnAutoScalingTargetName describes the target TidbCluster Ref Name for the TidbCluserAutoScaler
-	AnnAutoScalingTargetName = "auto-scaling.tidb.pingcap.com/target-name"
-	// AnnAutoScalingTargetNamespace describes the target TidbCluster Ref Namespace for the TidbCluserAutoScaler
-	AnnAutoScalingTargetNamespace = "auto-scaling.tidb.pingcap.com/target-namespace"
 	// AnnTiKVAutoScalingOutOrdinals describe the tikv pods' ordinal list which is created by auto-scaling out
 	AnnTiKVAutoScalingOutOrdinals = "tikv.tidb.pingcap.com/scale-out-ordinals"
 	// AnnTiDBAutoScalingOutOrdinals describe the tidb pods' ordinal list which is created by auto-scaling out
@@ -223,6 +207,24 @@ func (l Label) Instance(name string) Label {
 	return l
 }
 
+// UserBy adds use-by kv pair to label
+func (l Label) UsedBy(name string) Label {
+	l[UsedByLabelKey] = name
+	return l
+}
+
+// UsedByPeer adds used-by=peer label
+func (l Label) UsedByPeer() Label {
+	l[UsedByLabelKey] = "peer"
+	return l
+}
+
+// UsedByEndUser adds use-by=end-user label
+func (l Label) UsedByEndUser() Label {
+	l[UsedByLabelKey] = "end-user"
+	return l
+}
+
 // Namespace adds namespace kv pair to label
 func (l Label) Namespace(name string) Label {
 	l[NamespaceLabelKey] = name
@@ -294,9 +296,17 @@ func (l Label) Pump() Label {
 	return l
 }
 
+func (l Label) IsPump() bool {
+	return l[ComponentLabelKey] == PumpLabelVal
+}
+
 func (l Label) Monitor() Label {
 	l.Component(TiDBMonitorVal)
 	return l
+}
+
+func (l Label) IsMonitor() bool {
+	return l[ComponentLabelKey] == TiDBMonitorVal
 }
 
 // Discovery assigns discovery to component key in label
@@ -367,6 +377,15 @@ func (l Label) LabelSelector() *metav1.LabelSelector {
 // Labels converts label to map[string]string
 func (l Label) Labels() map[string]string {
 	return l
+}
+
+// Copy copy the value of label to avoid pointer copy
+func (l Label) Copy() Label {
+	copyLabel := make(Label)
+	for k, v := range l {
+		copyLabel[k] = v
+	}
+	return copyLabel
 }
 
 // String converts label to a string

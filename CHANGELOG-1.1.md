@@ -1,3 +1,102 @@
+> **Note:**
+>
+> * Starting from September 2, 2020, all release notes of TiDB Operator will be maintained in [pingcap/docs-tidb-operator](https://github.com/pingcap/docs-tidb-operator).
+> * You can read the release notes of all versions of TiDB Operator at [PingCAP Docs](https://docs.pingcap.com/tidb-in-kubernetes/stable/release-1.1.4).
+
+# TiDB Operator v1.1.4 Release Notes
+
+## Notable changes
+
+- `TableFilter` is added to the `BackupSpec` and `RestoreSpec`. `TableFilter` supports backing up specific databases or tables with Dumpling or BR and supports restoring specific databases or tables with BR.
+  `BackupSpec.Dumpling.TableFilter` is deprecated since v1.1.4. Please configure `BackupSpec.TableFilter` instead.
+  Since TiDB v4.0.3, you can configure `BackupSpec.TableFilter` to replace the `BackupSpec.BR.DB` and `BackupSpec.BR.Table` fields and configure `RestoreSpec.TableFilter` to replace the `RestoreSpec.BR.DB` and `RestoreSpec.BR.Table` fields ([#3134](https://github.com/pingcap/tidb-operator/pull/3134), [@sstubbs](https://github.com/sstubbs))
+- Update the version of TiDB and tools to v4.0.4 ([#3135](https://github.com/pingcap/tidb-operator/pull/3135), [@lichunzhu](https://github.com/lichunzhu))
+- Support customizing environment variables for the initializer container in the TidbMonitor CR ([#3109](https://github.com/pingcap/tidb-operator/pull/3109), [@kolbe](https://github.com/kolbe))
+- Support patching PVCs when the storage request is increased ([#3096](https://github.com/pingcap/tidb-operator/pull/3096), [@cofyc](https://github.com/cofyc))
+- Support TLS for Backup & Restore with Dumpling & TiDB Lightning ([#3100](https://github.com/pingcap/tidb-operator/pull/3100), [@lichunzhu](https://github.com/lichunzhu))
+- Support `cert-allowed-cn` for TiFlash ([#3101](https://github.com/pingcap/tidb-operator/pull/3101), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Add support for the [`max-index-length`](https://docs.pingcap.com/tidb/stable/tidb-configuration-file#max-index-length) TiDB config option to the TidbCluster CRD ([#3076](https://github.com/pingcap/tidb-operator/pull/3076), [@kolbe](https://github.com/kolbe))
+- Fix goroutine leak when TLS is enabled ([#3081](https://github.com/pingcap/tidb-operator/pull/3081), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Fix a memory leak issue caused by etcd client when TLS is enabled ([#3064](https://github.com/pingcap/tidb-operator/pull/3064), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Support TLS for TiFlash ([#3049](https://github.com/pingcap/tidb-operator/pull/3049), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Configure TZ environment for admission webhook and advanced statefulset controller deployed in tidb-operator chart ([#3034](https://github.com/pingcap/tidb-operator/pull/3034), [@cofyc](https://github.com/cofyc))
+
+# TiDB Operator v1.1.3 Release Notes
+
+## Action Required
+
+- Add a field `cleanPolicy` in `BackupSpec` to denote the clean policy for backup data when the Backup CR is deleted from the cluster (default to `Retain`). Note that before v1.1.3, TiDB Operator will clean the backup data in the remote storage when the Backup CR is deleted, so if you want to clean backup data as before, set `spec.cleanPolicy` in `Backup` CR or `spec.backupTemplate.cleanPolicy` in `BackupSchedule` CR to `Delete`. ([#3002](https://github.com/pingcap/tidb-operator/pull/3002), [@lichunzhu](https://github.com/lichunzhu))
+- Replace `mydumper` with `dumpling` for backup.
+  If `spec.mydumper` is configured in the `Backup` CR or `spec.backupTemplate.mydumper` is configured in the `BackupSchedule` CR, migrate it to `spec.dumpling` or `spec.backupTemplate.dumpling`. After you upgrade TiDB Operator to v1.1.3, note that `spec.mydumper` or `spec.backupTemplate.mydumper` will be lost after the upgrade. ([#2870](https://github.com/pingcap/tidb-operator/pull/2870), [@lichunzhu](https://github.com/lichunzhu))
+
+
+## Other Notable Changes
+
+- Update tools in backup manager to v4.0.3 ([#3019](https://github.com/pingcap/tidb-operator/pull/3019), [@lichunzhu](https://github.com/lichunzhu))
+- Support `cleanPolicy` for the `Backup` CR to define the clean behavior of the backup data in the remote storage when the `Backup` CR is deleted ([#3002](https://github.com/pingcap/tidb-operator/pull/3002), [@lichunzhu](https://github.com/lichunzhu))
+- Add TLS support for TiCDC ([#3011](https://github.com/pingcap/tidb-operator/pull/3011), [@weekface](https://github.com/weekface))
+- Add TLS support between Drainer and the downstream database server ([#2993](https://github.com/pingcap/tidb-operator/pull/2993), [@lichunzhu](https://github.com/lichunzhu))
+- Support specifying `mysqlNodePort` and `statusNodePort` for TiDB Service Spec ([#2941](https://github.com/pingcap/tidb-operator/pull/2941), [@lichunzhu](https://github.com/lichunzhu))
+- Fix the `initialCommitTs` bug in Drainer's `values.yaml` ([#2857](https://github.com/pingcap/tidb-operator/pull/2857), [@weekface](https://github.com/weekface))
+- Add `backup` config for TiKV server, add `enable-telemetry`, and deprecate `disable-telemetry` config for PD server ([#2964](https://github.com/pingcap/tidb-operator/pull/2964), [@lichunzhu](https://github.com/lichunzhu))
+- Add commitTS info column in `get restore` command ([#2926](https://github.com/pingcap/tidb-operator/pull/2926), [@lichunzhu](https://github.com/lichunzhu))
+- Update the used Grafana version from v6.0.1 to v6.1.6 ([#2923](https://github.com/pingcap/tidb-operator/pull/2923), [@lichunzhu](https://github.com/lichunzhu))
+- Support showing commitTS in restore status ([#2899](https://github.com/pingcap/tidb-operator/pull/2899), [@lichunzhu](https://github.com/lichunzhu))
+- Exit without error if the backup data the user tries to clean does not exist ([#2916](https://github.com/pingcap/tidb-operator/pull/2916), [@lichunzhu](https://github.com/lichunzhu))
+- Support auto-scaling by storage for TiKV in `TidbClusterAutoScaler` ([#2884](https://github.com/pingcap/tidb-operator/pull/2884), [@Yisaer](https://github.com/Yisaer))
+- Clean temporary files in `Backup` job with `Dumpling` to save space ([#2897](https://github.com/pingcap/tidb-operator/pull/2897), [@lichunzhu](https://github.com/lichunzhu))
+- Fail the backup job if existing PVC's size is smaller than the storage request in the backup job ([#2894](https://github.com/pingcap/tidb-operator/pull/2894), [@lichunzhu](https://github.com/lichunzhu))
+- Support scaling and auto-failover even if a TiKV store fails in upgrading ([#2886](https://github.com/pingcap/tidb-operator/pull/2886), [@cofyc](https://github.com/cofyc))
+- Fix a bug that the `TidbMonitor` resource could not be set ([#2878](https://github.com/pingcap/tidb-operator/pull/2878), [@weekface](https://github.com/weekface))
+- Fix an error for the monitor creation in the tidb-cluster chart ([#2869](https://github.com/pingcap/tidb-operator/pull/2869), [@8398a7](https://github.com/8398a7))
+- Remove `readyToScaleThresholdSeconds` in `TidbClusterAutoScaler`; TiDB Operator won't support de-noise in `TidbClusterAutoScaler` ([#2862](https://github.com/pingcap/tidb-operator/pull/2862), [@Yisaer](https://github.com/Yisaer))
+- Update the version of TiDB Lightning used in tidb-backup-manager from v3.0.15 to v4.0.2 ([#2865](https://github.com/pingcap/tidb-operator/pull/2865), [@lichunzhu](https://github.com/lichunzhu))
+
+
+# TiDB Operator v1.1.2 Release Notes
+
+## Action Required
+
+- An incompatible issue with PD 4.0.2 has been fixed. Please upgrade TiDB Operator to v1.1.2 before deploying TiDB 4.0.2 and later versions ([#2809](https://github.com/pingcap/tidb-operator/pull/2809), [@cofyc](https://github.com/cofyc))
+
+## Other Notable Changes
+
+- Collect metrics for TiCDC, TiDB Lightning and TiKV Importer ([#2835](https://github.com/pingcap/tidb-operator/pull/2835), [@weekface](https://github.com/weekface))
+- Update PD/TiDB/TiKV config to v4.0.2 ([#2828](https://github.com/pingcap/tidb-operator/pull/2828), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Fix the bug that `PD` Member might still exist after scaling-in ([#2793](https://github.com/pingcap/tidb-operator/pull/2793), [@Yisaer](https://github.com/Yisaer))
+- Support Auto-Scaler Reference in `TidbCluster` Status when there exists `TidbClusterAutoScaler` ([#2791](https://github.com/pingcap/tidb-operator/pull/2791), [@Yisaer](https://github.com/Yisaer))
+- Support configuring container lifecycle hooks and `terminationGracePeriodSeconds` in TiDB spec ([#2810](https://github.com/pingcap/tidb-operator/pull/2810), [@weekface](https://github.com/weekface))
+
+# TiDB Operator v1.1.1 Release Notes
+
+## Notable changes
+
+- Add the `additionalContainers` and `additionalVolumes` fields so that TiDB Operator can support adding sidecars to `TiDB`, `TiKV`, `PD`, etc. ([#2229](https://github.com/pingcap/tidb-operator/pull/2229), [@yeya24](https://github.com/yeya24))
+- Add cross check to ensure TiKV is not scaled or upgraded at the same time ([#2705](https://github.com/pingcap/tidb-operator/pull/2705), [@DanielZhangQD](https://github.com/DanielZhangQD))
+- Fix the bug that TidbMonitor will scrape multi TidbCluster with the same name in different namespaces when then namespace in `ClusterRef` is not set ([#2746](https://github.com/pingcap/tidb-operator/pull/2746), [@Yisaer](https://github.com/Yisaer))
+- Update TiDB Operator examples to deploy TiDB Cluster 4.0.0 images ([#2600](https://github.com/pingcap/tidb-operator/pull/2600), [@kolbe](https://github.com/kolbe))
+- Add the `alertMangerAlertVersion` option to TidbMonitor ([#2744](https://github.com/pingcap/tidb-operator/pull/2744), [@weekface](https://github.com/weekface))
+- Fix alert rules lost after rolling upgrade ([#2715](https://github.com/pingcap/tidb-operator/pull/2715), [@weekface](https://github.com/weekface))
+- Fix an issue that pods may be stuck in pending for a long time in scale-out after a scale-in ([#2709](https://github.com/pingcap/tidb-operator/pull/2709), [@cofyc](https://github.com/cofyc))
+- Add `EnableDashboardInternalProxy` in `PDSpec` to let user directly visit PD Dashboard ([#2713](https://github.com/pingcap/tidb-operator/pull/2713), [@Yisaer](https://github.com/Yisaer))
+- Fix the PV syncing error when `TidbMonitor` and `TidbCluster` have different values in `reclaimPolicy` ([#2707](https://github.com/pingcap/tidb-operator/pull/2707), [@Yisaer](https://github.com/Yisaer))
+- Update Configuration to v4.0.1 ([#2702](https://github.com/pingcap/tidb-operator/pull/2702), [@Yisaer](https://github.com/Yisaer))
+- Change tidb-discovery strategy type to `Recreate` to fix the bug that more than one discovery pod may exist ([#2701](https://github.com/pingcap/tidb-operator/pull/2701), [@weekface](https://github.com/weekface))
+- Expose the `Dashboard` service with `HTTP` endpoint whether `tlsCluster` is enabled ([#2684](https://github.com/pingcap/tidb-operator/pull/2684), [@Yisaer](https://github.com/Yisaer))
+- Add the `.tikv.dataSubDir` field to specify subdirectory within the data volume to store TiKV data ([#2682](https://github.com/pingcap/tidb-operator/pull/2682), [@cofyc](https://github.com/cofyc))
+- Add the `imagePullSecrets` attribute to all components ([#2679](https://github.com/pingcap/tidb-operator/pull/2679), [@weekface](https://github.com/weekface))
+- Enable StatefulSet and Pod validation webhook to work at the same time ([#2664](https://github.com/pingcap/tidb-operator/pull/2664), [@Yisaer](https://github.com/Yisaer))
+- Emit an event if it fails to sync labels to TiKV stores ([#2587](https://github.com/pingcap/tidb-operator/pull/2587), [@PengJi](https://github.com/PengJi))
+- Make `datasource` information hidden in log for `Backup` and `Restore` jobs ([#2652](https://github.com/pingcap/tidb-operator/pull/2652), [@Yisaer](https://github.com/Yisaer))
+- Support the `DynamicConfiguration` switch in TidbCluster Spec ([#2539](https://github.com/pingcap/tidb-operator/pull/2539), [@Yisaer](https://github.com/Yisaer))
+- Support `LoadBalancerSourceRanges` in the `ServiceSpec` for the `TidbCluster` and `TidbMonitor` ([#2610](https://github.com/pingcap/tidb-operator/pull/2610), [@shonge](https://github.com/shonge))
+- Support `Dashboard` metrics ability for `TidbCluster` when `TidbMonitor` deployed ([#2483](https://github.com/pingcap/tidb-operator/pull/2483), [@Yisaer](https://github.com/Yisaer))
+- Bump the DM version to v2.0.0-beta.1 ([#2615](https://github.com/pingcap/tidb-operator/pull/2615), [@tennix](https://github.com/tennix))
+- support setting discovery resources ([#2434](https://github.com/pingcap/tidb-operator/pull/2434), [@shonge](https://github.com/shonge))
+- Support the Denoising for the `TidbCluster` Auto-scaling ([#2307](https://github.com/pingcap/tidb-operator/pull/2307), [@vincent178](https://github.com/vincent178))
+- Support scraping `Pump` and `Drainer` metrics in TidbMonitor ([#2750](https://github.com/pingcap/tidb-operator/pull/2750), [@Yisaer](https://github.com/Yisaer))
+
+
 # TiDB Operator v1.1.0 Release Notes
 
 This is the GA release of TiDB Operator 1.1, which focuses on the usability, extensibility and security.
@@ -18,7 +117,7 @@ For v1.0.x users, refer to [Upgrade TiDB Operator](https://pingcap.com/docs/tidb
   For the `tidb-cluster` chart, we already have the `timezone` option (`UTC` by default). If the user does not change it to a different value (for example, `Asia/Shanghai`), none of the Pods will be recreated.
   If the user changes it to another value (for example, `Aisa/Shanghai`), all the related Pods (add a `TZ` env) will be recreated, namely rolling updated.
 
-  The related Pods include `pump`, `drainer`, `dicovery`, `monitor`, `scheduled backup`, `tidb-initializer`, and `tikv-importer`.
+  The related Pods include `pump`, `drainer`, `discovery`, `monitor`, `scheduled backup`, `tidb-initializer`, and `tikv-importer`.
 
   All images' time zone maintained by TiDB Operator is `UTC`. If you use your own images, you need to make sure that the time zone inside your images is `UTC`.
 
@@ -231,7 +330,7 @@ This is a pre-release of `v1.1.0`, which focuses on the usability, extensibility
 
   Regarding other charts, we don't have a `timezone` option in their `values.yaml`. We add the `timezone` option in this PR. No matter whether the user uses the old `values.yaml` or the new `values.yaml`, all the related Pods (add a `TZ` env) will not be recreated (rolling update).
 
-  The related Pods include `pump`, `drainer`, `dicovery`, `monitor`, `scheduled backup`, `tidb-initializer`, and `tikv-importer`.
+  The related Pods include `pump`, `drainer`, `discovery`, `monitor`, `scheduled backup`, `tidb-initializer`, and `tikv-importer`.
 
   All images' time zone maintained by `tidb-operator` is `UTC`. If you use your own images, you need to make sure that the time zone inside your images is `UTC`.
 

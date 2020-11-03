@@ -24,9 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	kubeinformers "k8s.io/client-go/informers"
 	podinformers "k8s.io/client-go/informers/core/v1"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/pointer"
 )
 
@@ -84,7 +82,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			getLastAppliedConfigErr: false,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.TiDB.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(0)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(0)))
 			},
 		},
 		{
@@ -129,7 +127,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			},
 			getLastAppliedConfigErr: false,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 		{
@@ -140,7 +138,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			},
 			getLastAppliedConfigErr: false,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 		{
@@ -153,7 +151,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			getLastAppliedConfigErr: false,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.TiDB.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 		{
@@ -165,7 +163,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			getLastAppliedConfigErr: true,
 			errorExpect:             true,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 		{
@@ -182,7 +180,7 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 			errorExpect:             true,
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.TiDB.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 	}
@@ -194,10 +192,11 @@ func TestTiDBUpgrader_Upgrade(t *testing.T) {
 }
 
 func newTiDBUpgrader() (Upgrader, *controller.FakeTiDBControl, podinformers.PodInformer) {
-	kubeCli := kubefake.NewSimpleClientset()
-	tidbControl := controller.NewFakeTiDBControl()
-	podInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Pods()
-	return &tidbUpgrader{tidbControl: tidbControl, podLister: podInformer.Lister()}, tidbControl, podInformer
+	fakeDeps := controller.NewFakeDependencies()
+	upgrader := &tidbUpgrader{fakeDeps}
+	tidbControl := fakeDeps.TiDBControl.(*controller.FakeTiDBControl)
+	podInformer := fakeDeps.KubeInformerFactory.Core().V1().Pods()
+	return upgrader, tidbControl, podInformer
 }
 
 func newStatefulSetForTiDBUpgrader() *apps.StatefulSet {
@@ -207,7 +206,7 @@ func newStatefulSetForTiDBUpgrader() *apps.StatefulSet {
 			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: apps.StatefulSetSpec{
-			Replicas: controller.Int32Ptr(2),
+			Replicas: pointer.Int32Ptr(2),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -220,7 +219,7 @@ func newStatefulSetForTiDBUpgrader() *apps.StatefulSet {
 			},
 			UpdateStrategy: apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType,
 				RollingUpdate: &apps.RollingUpdateStatefulSetStrategy{
-					Partition: controller.Int32Ptr(1),
+					Partition: pointer.Int32Ptr(1),
 				},
 			},
 		},
@@ -247,21 +246,21 @@ func newTidbClusterForTiDBUpgrader() *v1alpha1.TidbCluster {
 			UID:       types.UID("upgrader"),
 		},
 		Spec: v1alpha1.TidbClusterSpec{
-			PD: v1alpha1.PDSpec{
+			PD: &v1alpha1.PDSpec{
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Image: "pd-test-image",
 				},
 				Replicas:         3,
 				StorageClassName: pointer.StringPtr("my-storage-class"),
 			},
-			TiKV: v1alpha1.TiKVSpec{
+			TiKV: &v1alpha1.TiKVSpec{
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Image: "tikv-test-image",
 				},
 				Replicas:         3,
 				StorageClassName: pointer.StringPtr("my-storage-class"),
 			},
-			TiDB: v1alpha1.TiDBSpec{
+			TiDB: &v1alpha1.TiDBSpec{
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Image: "tidb-test-image",
 				},

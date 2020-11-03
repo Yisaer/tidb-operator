@@ -34,7 +34,7 @@ spec:
       annotations:
         service.beta.kubernetes.io/alicloud-loadbalancer-address-type: internet
     username: admin
-    version: 6.0.1
+    version: 6.1.6
   imagePullPolicy: IfNotPresent
   initializer:
     baseImage: pingcap/tidb-monitor-initializer
@@ -46,7 +46,7 @@ spec:
     #  requests:
     #    cpu: 50m
     #    memory: 64Mi
-    version: v3.0.13
+    version: v4.0.7
   kubePrometheusURL: ""
   nodeSelector: {}
   persistent: true

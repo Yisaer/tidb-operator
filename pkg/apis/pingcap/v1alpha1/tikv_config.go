@@ -24,6 +24,8 @@ type TiKVConfig struct {
 	// +optional
 	LogFile *string `json:"log-file,omitempty" toml:"log-file,omitempty"`
 	// +optional
+	LogFormat *string `json:"log-format,omitempty" toml:"log-format,omitempty"`
+	// +optional
 	SlowLogFile *string `json:"slow-log-file,omitempty" toml:"slow-log-file,omitempty"`
 	// +optional
 	SlowLogThreshold *string `json:"slow-log-threshold,omitempty" toml:"slow-log-threshold,omitempty"`
@@ -60,6 +62,8 @@ type TiKVConfig struct {
 	Security *TiKVSecurityConfig `json:"security,omitempty" toml:"security,omitempty"`
 	// +optional
 	TiKVPessimisticTxn *TiKVPessimisticTxn `json:"pessimistic-txn,omitempty" toml:"pessimistic-txn,omitempty"`
+	// +optional
+	Backup *TiKVBackupConfig `json:"backup,omitempty" toml:"backup,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -78,6 +82,7 @@ type TiKVUnifiedReadPoolConfig struct {
 	MinThreadCount *int32 `json:"min-thread-count,omitempty" toml:"min-thread-count,omitempty"`
 	// +optional
 	MaxThreadCount *int32 `json:"max-thread-count,omitempty" toml:"max-thread-count,omitempty"`
+	// Deprecated in v4.0.0
 	// +optional
 	StackSize *string `json:"stack-size,omitempty" toml:"stack-size,omitempty"`
 	// +optional
@@ -107,6 +112,9 @@ type TiKVStorageReadPoolConfig struct {
 	// Optional: Defaults to 10MB
 	// +optional
 	StackSize *string `json:"stack-size,omitempty" toml:"stack-size,omitempty"`
+	// Optional: Defaults to true
+	// +optional
+	UseUnifiedPool *bool `json:"use-unified-pool,omitempty" toml:"use-unified-pool,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -132,6 +140,9 @@ type TiKVCoprocessorReadPoolConfig struct {
 	// Optional: Defaults to 10MB
 	// +optional
 	StackSize *string `json:"stack-size,omitempty" toml:"stack-size,omitempty"`
+	// Optional: Defaults to true
+	// +optional
+	UseUnifiedPool *bool `json:"use-unified-pool,omitempty" toml:"use-unified-pool,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -341,9 +352,13 @@ type TiKVImportConfig struct {
 type TiKVGCConfig struct {
 	// +optional
 	// Optional: Defaults to 512
-	BatchKeys *int64 `json:"	batch-keys,omitempty" toml:"	batch-keys,omitempty"`
+	BatchKeys *int64 `json:"batch-keys,omitempty" toml:"batch-keys,omitempty"`
 	// +optional
-	MaxWriteBytesPerSec *string `json:"	max-write-bytes-per-sec,omitempty" toml:"	max-write-bytes-per-sec,omitempty"`
+	MaxWriteBytesPerSec *string `json:"max-write-bytes-per-sec,omitempty" toml:"max-write-bytes-per-sec,omitempty"`
+	// +optional
+	EnableCompactionFilter *bool `json:"enable-compaction-filter,omitempty" toml:"enable-compaction-filter,omitempty"`
+	// +optional
+	EnableCompactionFilterSkipVersionCheck *bool `json:"compaction-filter-skip-version-check,omitempty" toml:"compaction-filter-skip-version-check,omitempty"`
 }
 
 // TiKVDbConfig is the rocksdb config.
@@ -540,6 +555,7 @@ type TiKVTitanDBConfig struct {
 type TiKVStorageConfig struct {
 	// +optional
 	MaxKeySize *int64 `json:"max-key-size,omitempty" toml:"max-key-size,omitempty"`
+	// Deprecated in v4.0.0
 	// +optional
 	SchedulerNotifyCapacity *int64 `json:"scheduler-notify-capacity,omitempty" toml:"scheduler-notify-capacity,omitempty"`
 	// +optional
@@ -586,6 +602,9 @@ type TiKVServerConfig struct {
 	// Optional: Defaults to 1
 	// +optional
 	StatusThreadPoolSize *string `json:"status-thread-pool-size,omitempty" toml:"status-thread-pool-size,omitempty"`
+	// Optional: Defaults to 10485760
+	// +optional
+	MaxGrpcSendMsgLen *uint `json:"max-grpc-send-msg-len,omitempty" toml:"max-grpc-send-msg-len,omitempty"`
 	// Optional: Defaults to none
 	// +optional
 	GrpcCompressionType *string `json:"grpc-compression-type,omitempty" toml:"grpc-compression-type,omitempty"`
@@ -658,7 +677,6 @@ type TiKVRaftstoreConfig struct {
 	// Optional: Defaults to true
 	// +optional
 	SyncLog *bool `json:"sync-log,omitempty" toml:"sync-log,omitempty"`
-
 	// Optional: Defaults to true
 	// +optional
 	Prevote *bool `json:"prevote,omitempty" toml:"prevote,omitempty"`
@@ -673,7 +691,15 @@ type TiKVRaftstoreConfig struct {
 	// Optional: Defaults to 8MB
 	// +optional
 	RaftEntryMaxSize *string `json:"raft-entry-max-size,omitempty" toml:"raft-entry-max-size,omitempty"`
-
+	// Limit the max size of each append message.
+	// Optional: Defaults to 1MB
+	// +optional
+	RaftMaxSizePerMsg *string `json:"raft-max-size-per-msg,omitempty" toml:"raft-max-size-per-msg,omitempty"`
+	// Limit the max number of in-flight append messages during optimistic
+	// replication phase.
+	// Optional: Defaults to 256
+	// +optional
+	RaftMaxInflightMsgs *int64 `json:"raft-max-inflight-msgs,omitempty" toml:"raft-max-inflight-msgs,omitempty"`
 	// Interval to gc unnecessary raft log (ms).
 	// Optional: Defaults to 10s
 	// +optional
@@ -818,8 +844,23 @@ type TiKVRaftstoreConfig struct {
 	// Optional: Defaults to 2
 	// +optional
 	StorePoolSize *int64 `json:"store-pool-size,omitempty" toml:"store-pool-size,omitempty"`
+	// Optional: Defaults to 3s
+	// +optional
+	StoreRescheduleDuration *string `json:"store-reschedule-duration,omitempty" toml:"store-reschedule-duration,omitempty"`
+	// Optional: Defaults to 500ms
+	// +optional
+	ApplyYieldDuration *string `json:"apply-yield-duration,omitempty" toml:"apply-yield-duration,omitempty"`
 	// +optional
 	HibernateRegions *bool `json:"hibernate-regions,omitempty" toml:"hibernate-regions,omitempty"`
+	// Optional: Defaults to false
+	// +optional
+	ApplyEarly *bool `json:"apply-early,omitempty" toml:"apply-early, omitempty"`
+	// Optional: Defaults to 0
+	// +optional
+	PerfLevel *int64 `json:"perf-level,omitempty" toml:"perf-level, omitempty"`
+	// Optional: Defaults to false
+	// +optional
+	DevAssert *bool `json:"dev-assert,omitempty" toml:"dev-assert, omitempty"`
 }
 
 // TiKVCoprocessorConfig is the configuration of TiKV Coprocessor component.
@@ -927,7 +968,7 @@ type MasterKeyKMSConfig struct {
 
 	// SecretKey of AWS user, leave empty if using other authrization method
 	// optional
-	SecretKey *string `json:"secret-access-key,omitempty" toml:"access-key,omitempty"`
+	SecretKey *string `json:"secret-access-key,omitempty" toml:"secret-access-key,omitempty"`
 
 	// Region of this KMS key
 	// Optional: Default to us-east-1
@@ -955,4 +996,10 @@ type TiKVPessimisticTxn struct {
 	WakeUpDelayDuration *string `json:"wake-up-delay-duration,omitempty" toml:"wake-up-delay-duration,omitempty"`
 	// +optional
 	Pipelined *bool `json:"pipelined,omitempty" toml:"pipelined,omitempty"`
+}
+
+// +k8s:openapi-gen=true
+type TiKVBackupConfig struct {
+	// +optional
+	NumThreads *int64 `json:"num-threads,omitempty" toml:"num-threads,omitempty"`
 }

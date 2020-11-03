@@ -16,8 +16,10 @@ package backup
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/pingcap/tidb-operator/cmd/backup-manager/app/constants"
 	"github.com/pingcap/tidb-operator/cmd/backup-manager/app/util"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
@@ -127,6 +129,7 @@ func (bm *Manager) ProcessBackup() error {
 func (bm *Manager) performBackup(backup *v1alpha1.Backup, db *sql.DB) error {
 	started := time.Now()
 
+	var errs []error
 	err := bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
 		Type:   v1alpha1.BackupRunning,
 		Status: corev1.ConditionTrue,
@@ -135,7 +138,28 @@ func (bm *Manager) performBackup(backup *v1alpha1.Backup, db *sql.DB) error {
 		return err
 	}
 
-	var errs []error
+	backupFullPath, err := util.GetRemotePath(backup)
+	if err != nil {
+		errs = append(errs, err)
+		uerr := bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
+			Type:    v1alpha1.BackupFailed,
+			Status:  corev1.ConditionTrue,
+			Reason:  "GetBackupRemotePathFailed",
+			Message: err.Error(),
+		})
+		errs = append(errs, uerr)
+		return errorutils.NewAggregate(errs)
+	}
+
+	backup.Status.BackupPath = backupFullPath
+	err = bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
+		Type:   v1alpha1.BackupPrepare,
+		Status: corev1.ConditionTrue,
+	})
+	if err != nil {
+		return err
+	}
+
 	oldTikvGCTime, err := bm.GetTikvGCLifeTime(db)
 	if err != nil {
 		errs = append(errs, err)
@@ -216,10 +240,13 @@ func (bm *Manager) performBackup(backup *v1alpha1.Backup, db *sql.DB) error {
 		klog.Infof("set cluster %s %s to %s success", bm, constants.TikvGCVariable, tikvGCLifeTime)
 	}
 
-	backupFullPath, backupErr := bm.backupData(backup)
+	backupErr := bm.backupData(backup)
 	if oldTikvGCTimeDuration < tikvGCTimeDuration {
 		err = bm.SetTikvGCLifeTime(db, oldTikvGCTime)
 		if err != nil {
+			if backupErr != nil {
+				errs = append(errs, backupErr)
+			}
 			errs = append(errs, err)
 			klog.Errorf("cluster %s reset tikv GC life time to %s failed, err: %s", bm, oldTikvGCTime, err)
 			uerr := bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
@@ -248,45 +275,31 @@ func (bm *Manager) performBackup(backup *v1alpha1.Backup, db *sql.DB) error {
 	}
 	klog.Infof("backup cluster %s data to %s success", bm, backupFullPath)
 
-	// Note: The size get from remote may be incorrect because the blobs
-	// are eventually consistent.
-	size, err := getBackupSize(backup)
+	backupMeta, err := util.GetBRMetaData(backup.Spec.StorageProvider)
 	if err != nil {
 		errs = append(errs, err)
-		klog.Errorf("Get size for backup files in %s of cluster %s failed, err: %s", backupFullPath, bm, err)
+		klog.Errorf("Get backup metadata for backup files in %s of cluster %s failed, err: %s", backupFullPath, bm, err)
 		uerr := bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
 			Type:    v1alpha1.BackupFailed,
 			Status:  corev1.ConditionTrue,
-			Reason:  "GetBackupSizeFailed",
+			Reason:  "GetBackupMetadataFailed",
 			Message: err.Error(),
 		})
 		errs = append(errs, uerr)
 		return errorutils.NewAggregate(errs)
 	}
+	klog.Infof("Get br metadata for backup files in %s of cluster %s success", backupFullPath, bm)
+	size := util.GetBRArchiveSize(backupMeta)
+	commitTs := backupMeta.EndVersion
 	klog.Infof("Get size %d for backup files in %s of cluster %s success", size, backupFullPath, bm)
-
-	commitTs, err := getCommitTs(backup)
-	if err != nil {
-		errs = append(errs, err)
-		klog.Errorf("get cluster %s commitTs failed, err: %s", bm, err)
-		uerr := bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
-			Type:    v1alpha1.BackupFailed,
-			Status:  corev1.ConditionTrue,
-			Reason:  "GetCommitTsFailed",
-			Message: err.Error(),
-		})
-		errs = append(errs, uerr)
-		return errorutils.NewAggregate(errs)
-	}
-	klog.Infof("get cluster %s commitTs %d success", bm, commitTs)
-
+	klog.Infof("Get cluster %s commitTs %d success", bm, commitTs)
 	finish := time.Now()
 
-	backup.Status.BackupPath = backupFullPath
 	backup.Status.TimeStarted = metav1.Time{Time: started}
 	backup.Status.TimeCompleted = metav1.Time{Time: finish}
-	backup.Status.BackupSize = size
-	backup.Status.CommitTs = fmt.Sprintf("%d", commitTs)
+	backup.Status.BackupSize = int64(size)
+	backup.Status.BackupSizeReadable = humanize.Bytes(uint64(size))
+	backup.Status.CommitTs = strconv.FormatUint(commitTs, 10)
 
 	return bm.StatusUpdater.Update(backup, &v1alpha1.BackupCondition{
 		Type:   v1alpha1.BackupComplete,

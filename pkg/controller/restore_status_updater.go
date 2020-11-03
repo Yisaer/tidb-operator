@@ -15,7 +15,6 @@ package controller
 
 import (
 	"fmt"
-	"strings"
 
 	"k8s.io/klog"
 
@@ -23,7 +22,6 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
 	informers "github.com/pingcap/tidb-operator/pkg/client/informers/externalversions/pingcap/v1alpha1"
 	listers "github.com/pingcap/tidb-operator/pkg/client/listers/pingcap/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -47,13 +45,13 @@ func NewRealRestoreConditionUpdater(
 	restoreLister listers.RestoreLister,
 	recorder record.EventRecorder) RestoreConditionUpdaterInterface {
 	return &realRestoreConditionUpdater{
-		cli,
-		restoreLister,
-		recorder,
+		cli:           cli,
+		restoreLister: restoreLister,
+		recorder:      recorder,
 	}
 }
 
-func (rcu *realRestoreConditionUpdater) Update(restore *v1alpha1.Restore, condition *v1alpha1.RestoreCondition) error {
+func (u *realRestoreConditionUpdater) Update(restore *v1alpha1.Restore, condition *v1alpha1.RestoreCondition) error {
 	ns := restore.GetNamespace()
 	restoreName := restore.GetName()
 	oldStatus := restore.Status.DeepCopy()
@@ -61,12 +59,12 @@ func (rcu *realRestoreConditionUpdater) Update(restore *v1alpha1.Restore, condit
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		isUpdate = v1alpha1.UpdateRestoreCondition(&restore.Status, condition)
 		if isUpdate {
-			_, updateErr := rcu.cli.PingcapV1alpha1().Restores(ns).Update(restore)
+			_, updateErr := u.cli.PingcapV1alpha1().Restores(ns).Update(restore)
 			if updateErr == nil {
 				klog.Infof("Restore: [%s/%s] updated successfully", ns, restoreName)
 				return nil
 			}
-			if updated, err := rcu.restoreLister.Restores(ns).Get(restoreName); err == nil {
+			if updated, err := u.restoreLister.Restores(ns).Get(restoreName); err == nil {
 				// make a copy so we don't mutate the shared cache
 				restore = updated.DeepCopy()
 				restore.Status = *oldStatus
@@ -78,21 +76,6 @@ func (rcu *realRestoreConditionUpdater) Update(restore *v1alpha1.Restore, condit
 		return nil
 	})
 	return err
-}
-
-func (rcu *realRestoreConditionUpdater) recordRestoreEvent(verb string, restore *v1alpha1.Restore, err error) {
-	restoreName := restore.GetName()
-	if err == nil {
-		reason := fmt.Sprintf("Successful%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s Restore %s successful",
-			strings.ToLower(verb), restoreName)
-		rcu.recorder.Event(restore, corev1.EventTypeNormal, reason, msg)
-	} else {
-		reason := fmt.Sprintf("Failed%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s Restore %s failed error: %s",
-			strings.ToLower(verb), restoreName, err)
-		rcu.recorder.Event(restore, corev1.EventTypeWarning, reason, msg)
-	}
 }
 
 var _ RestoreConditionUpdaterInterface = &realRestoreConditionUpdater{}
@@ -114,19 +97,19 @@ func NewFakeRestoreConditionUpdater(restoreInformer informers.RestoreInformer) *
 }
 
 // SetUpdateRestoreError sets the error attributes of updateRestoreTracker
-func (frc *FakeRestoreConditionUpdater) SetUpdateRestoreError(err error, after int) {
-	frc.updateRestoreTracker.SetError(err).SetAfter(after)
+func (u *FakeRestoreConditionUpdater) SetUpdateRestoreError(err error, after int) {
+	u.updateRestoreTracker.SetError(err).SetAfter(after)
 }
 
 // UpdateRestore updates the Restore
-func (frc *FakeRestoreConditionUpdater) Update(restore *v1alpha1.Restore, _ *v1alpha1.RestoreCondition) error {
-	defer frc.updateRestoreTracker.Inc()
-	if frc.updateRestoreTracker.ErrorReady() {
-		defer frc.updateRestoreTracker.Reset()
-		return frc.updateRestoreTracker.GetError()
+func (u *FakeRestoreConditionUpdater) Update(restore *v1alpha1.Restore, _ *v1alpha1.RestoreCondition) error {
+	defer u.updateRestoreTracker.Inc()
+	if u.updateRestoreTracker.ErrorReady() {
+		defer u.updateRestoreTracker.Reset()
+		return u.updateRestoreTracker.GetError()
 	}
 
-	return frc.RestoreIndexer.Update(restore)
+	return u.RestoreIndexer.Update(restore)
 }
 
 var _ RestoreConditionUpdaterInterface = &FakeRestoreConditionUpdater{}

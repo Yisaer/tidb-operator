@@ -61,6 +61,8 @@ const (
 	NormalPhase MemberPhase = "Normal"
 	// UpgradePhase represents the upgrade state of TiDB cluster.
 	UpgradePhase MemberPhase = "Upgrade"
+	// ScalePhase represents the scaling state of TiDB cluster.
+	ScalePhase MemberPhase = "Scale"
 )
 
 // ConfigUpdateStrategy represents the strategy to update configuration
@@ -110,14 +112,20 @@ type TidbClusterSpec struct {
 	// Discovery spec
 	Discovery DiscoverySpec `json:"discovery,omitempty"`
 
+	// Specify a Service Account
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+
 	// PD cluster spec
-	PD PDSpec `json:"pd"`
+	// +optional
+	PD *PDSpec `json:"pd,omitempty"`
 
 	// TiDB cluster spec
-	TiDB TiDBSpec `json:"tidb"`
+	// +optional
+	TiDB *TiDBSpec `json:"tidb,omitempty"`
 
 	// TiKV cluster spec
-	TiKV TiKVSpec `json:"tikv"`
+	// +optional
+	TiKV *TiKVSpec `json:"tikv,omitempty"`
 
 	// TiFlash cluster spec
 	// +optional
@@ -150,12 +158,16 @@ type TidbClusterSpec struct {
 	SchedulerName string `json:"schedulerName,omitempty"`
 
 	// Persistent volume reclaim policy applied to the PVs that consumed by TiDB cluster
-	// +kubebuilder:default=Recycle
-	PVReclaimPolicy corev1.PersistentVolumeReclaimPolicy `json:"pvReclaimPolicy,omitempty"`
+	// +kubebuilder:default=Retain
+	PVReclaimPolicy *corev1.PersistentVolumeReclaimPolicy `json:"pvReclaimPolicy,omitempty"`
 
 	// ImagePullPolicy of TiDB cluster Pods
 	// +kubebuilder:default=IfNotPresent
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	// ConfigUpdateStrategy determines how the configuration change is applied to the cluster.
 	// UpdateStrategyInPlace will update the ConfigMap of configuration in-place and an extra rolling-update of the
@@ -211,18 +223,35 @@ type TidbClusterSpec struct {
 	// Deprecated
 	// +k8s:openapi-gen=false
 	Services []Service `json:"services,omitempty"`
+
+	// EnableDynamicConfiguration indicates whether DynamicConfiguration is enabled for the tidbcluster
+	// +optional
+	EnableDynamicConfiguration *bool `json:"enableDynamicConfiguration,omitempty"`
+
+	// Cluster is the external cluster, if configured, the components in this TidbCluster will join to this configured cluster.
+	// +optional
+	Cluster *TidbClusterRef `json:"cluster,omitempty"`
+
+	// PDAddresses are the external PD addresses, if configured, the PDs in this TidbCluster will join to the configured PD cluster.
+	// +optional
+	PDAddresses []string `json:"pdAddresses,omitempty"`
+
+	// StatefulSetUpdateStrategy of TiDB cluster StatefulSets
+	// +optional
+	StatefulSetUpdateStrategy apps.StatefulSetUpdateStrategyType `json:"statefulSetUpdateStrategy,omitempty"`
 }
 
 // TidbClusterStatus represents the current status of a tidb cluster.
 type TidbClusterStatus struct {
-	ClusterID string          `json:"clusterID,omitempty"`
-	PD        PDStatus        `json:"pd,omitempty"`
-	TiKV      TiKVStatus      `json:"tikv,omitempty"`
-	TiDB      TiDBStatus      `json:"tidb,omitempty"`
-	Pump      PumpStatus      `josn:"pump,omitempty"`
-	TiFlash   TiFlashStatus   `json:"tiflash,omitempty"`
-	TiCDC     TiCDCStatus     `json:"ticdc,omitempty"`
-	Monitor   *TidbMonitorRef `json:"monitor,omitempty"`
+	ClusterID  string                    `json:"clusterID,omitempty"`
+	PD         PDStatus                  `json:"pd,omitempty"`
+	TiKV       TiKVStatus                `json:"tikv,omitempty"`
+	TiDB       TiDBStatus                `json:"tidb,omitempty"`
+	Pump       PumpStatus                `json:"pump,omitempty"`
+	TiFlash    TiFlashStatus             `json:"tiflash,omitempty"`
+	TiCDC      TiCDCStatus               `json:"ticdc,omitempty"`
+	Monitor    *TidbMonitorRef           `json:"monitor,omitempty"`
+	AutoScaler *TidbClusterAutoScalerRef `json:"auto-scaler,omitempyt"`
 	// Represents the latest available observations of a tidb cluster's state.
 	// +optional
 	Conditions []TidbClusterCondition `json:"conditions,omitempty"`
@@ -273,6 +302,9 @@ type PDSpec struct {
 	ComponentSpec               `json:",inline"`
 	corev1.ResourceRequirements `json:",inline"`
 
+	// Specify a Service Account for pd
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+
 	// The desired ready replicas
 	// +kubebuilder:validation:Minimum=1
 	Replicas int32 `json:"replicas"`
@@ -299,14 +331,33 @@ type PDSpec struct {
 	// +optional
 	StorageClassName *string `json:"storageClassName,omitempty"`
 
+	// Subdirectory within the volume to store PD Data. By default, the data
+	// is stored in the root directory of volume which is mounted at
+	// /var/lib/pd.
+	// Specifying this will change the data directory to a subdirectory, e.g.
+	// /var/lib/pd/data if you set the value to "data".
+	// It's dangerous to change this value for a running cluster as it will
+	// upgrade your cluster to use a new storage directory.
+	// Defaults to "" (volume's root).
+	// +optional
+	DataSubDir string `json:"dataSubDir,omitempty"`
+
 	// Config is the Configuration of pd-servers
 	// +optional
-	Config *PDConfig `json:"config,omitempty"`
+	Config *PDConfigWraper `json:"config,omitempty"`
 
 	// TLSClientSecretName is the name of secret which stores tidb server client certificate
 	// which used by Dashboard.
 	// +optional
 	TLSClientSecretName *string `json:"tlsClientSecretName,omitempty"`
+
+	// EnableDashboardInternalProxy would directly set `internal-proxy` in the `PdConfig`
+	// +optional
+	EnableDashboardInternalProxy *bool `json:"enableDashboardInternalProxy,omitempty"`
+
+	// MountClusterClientSecret indicates whether to mount `cluster-client-secret` to the Pod
+	// +optional
+	MountClusterClientSecret *bool `json:"mountClusterClientSecret,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -345,9 +396,38 @@ type TiKVSpec struct {
 	// +optional
 	StorageClassName *string `json:"storageClassName,omitempty"`
 
+	// Subdirectory within the volume to store TiKV Data. By default, the data
+	// is stored in the root directory of volume which is mounted at
+	// /var/lib/tikv.
+	// Specifying this will change the data directory to a subdirectory, e.g.
+	// /var/lib/tikv/data if you set the value to "data".
+	// It's dangerous to change this value for a running cluster as it will
+	// upgrade your cluster to use a new storage directory.
+	// Defaults to "" (volume's root).
+	// +optional
+	DataSubDir string `json:"dataSubDir,omitempty"`
+
 	// Config is the Configuration of tikv-servers
 	// +optional
-	Config *TiKVConfig `json:"config,omitempty"`
+	Config *TiKVConfigWraper `json:"config,omitempty"`
+
+	// RecoverFailover indicates that Operator can recover the failover Pods
+	// +optional
+	RecoverFailover bool `json:"recoverFailover,omitempty"`
+
+	// MountClusterClientSecret indicates whether to mount `cluster-client-secret` to the Pod
+	// +optional
+	MountClusterClientSecret *bool `json:"mountClusterClientSecret,omitempty"`
+
+	// EvictLeaderTimeout indicates the timeout to evict tikv leader, in the format of Go Duration.
+	// Defaults to 3m
+	// +optional
+	EvictLeaderTimeout *string `json:"evictLeaderTimeout,omitempty"`
+
+	// StorageVolumes is additional storage apply for TiKV node.
+	// Default to storageClassName storage class
+	// +optional
+	StorageVolumes []StorageVolume `json:"storageVolumes,omitempty"`
 }
 
 // TiFlashSpec contains details of TiFlash members
@@ -386,11 +466,15 @@ type TiFlashSpec struct {
 
 	// Config is the Configuration of TiFlash
 	// +optional
-	Config *TiFlashConfig `json:"config,omitempty"`
+	Config *TiFlashConfigWraper `json:"config,omitempty"`
 
 	// LogTailer is the configurations of the log tailers for TiFlash
 	// +optional
 	LogTailer *LogTailerSpec `json:"logTailer,omitempty"`
+
+	// RecoverFailover indicates that Operator can recover the failover Pods
+	// +optional
+	RecoverFailover bool `json:"recoverFailover,omitempty"`
 }
 
 // TiCDCSpec contains details of TiCDC members
@@ -465,6 +549,9 @@ type TiDBSpec struct {
 	ComponentSpec               `json:",inline"`
 	corev1.ResourceRequirements `json:",inline"`
 
+	// Specify a Service Account for tidb
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+
 	// The desired ready replicas
 	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
@@ -511,7 +598,36 @@ type TiDBSpec struct {
 
 	// Config is the Configuration of tidb-servers
 	// +optional
-	Config *TiDBConfig `json:"config,omitempty"`
+	Config *TiDBConfigWraper `json:"config,omitempty"`
+
+	// Lifecycle describes actions that the management system should take in response to container lifecycle
+	// events. For the PostStart and PreStop lifecycle handlers, management of the container blocks
+	// until the action is complete, unless the container process fails, in which case the handler is aborted.
+	// +optional
+	Lifecycle *corev1.Lifecycle `json:"lifecycle,omitempty"`
+	// ReadinessProbe describes actions that probe the tidb's readiness.
+	// the default behavior is like setting type as "tcp"
+	// +optional
+	ReadinessProbe *TiDBProbe `json:"readinessProbe,omitempty"`
+}
+
+const (
+	TCPProbeType     string = "tcp"
+	CommandProbeType string = "command"
+)
+
+// +k8s:openapi-gen=true
+// TiDBProbe contains details of probing tidb.
+// default probe by TCPPort on 4000.
+type TiDBProbe struct {
+	// "tcp" will use TCP socket to connetct port 4000
+	//
+	// "command" will probe the status api of tidb.
+	// This will use curl command to request tidb, before v4.0.9 there is no curl in the image,
+	// So do not use this before v4.0.9.
+	// +kubebuilder:validation:Enum=tcp,command
+	// +optional
+	Type *string `json:"type,omitempty"` // tcp or command
 }
 
 // +k8s:openapi-gen=true
@@ -519,6 +635,9 @@ type TiDBSpec struct {
 type PumpSpec struct {
 	ComponentSpec               `json:",inline"`
 	corev1.ResourceRequirements `json:",inline"`
+
+	// Specify a Service Account for pump
+	ServiceAccount string `json:"serviceAccount,omitempty"`
 
 	// The desired ready replicas
 	// +kubebuilder:validation:Minimum=0
@@ -538,7 +657,7 @@ type PumpSpec struct {
 	// TODO: add schema
 	// The configuration of Pump cluster.
 	// +optional
-	config.GenericConfig `json:",inline"`
+	Config *config.GenericConfig `json:"config,omitempty"`
 
 	// +k8s:openapi-gen=false
 	// For backward compatibility with helm chart
@@ -592,6 +711,10 @@ type ComponentSpec struct {
 	// Optional: Defaults to cluster-level setting
 	// +optional
 	ImagePullPolicy *corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	// Whether Hostnetwork of the component is enabled. Override the cluster-level setting if present
 	// Optional: Defaults to cluster-level setting
@@ -654,6 +777,31 @@ type ComponentSpec struct {
 	// - SLOW_LOG_FILE
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Additional containers of the component.
+	// +optional
+	AdditionalContainers []corev1.Container `json:"additionalContainers,omitempty"`
+
+	// Additional volumes of component pod. Currently this only
+	// supports additional volume mounts for sidecar containers.
+	// +optional
+	AdditionalVolumes []corev1.Volume `json:"additionalVolumes,omitempty"`
+
+	// Optional duration in seconds the pod needs to terminate gracefully. May be decreased in delete request.
+	// Value must be non-negative integer. The value zero indicates delete immediately.
+	// If this value is nil, the default grace period will be used instead.
+	// The grace period is the duration in seconds after the processes running in the pod are sent
+	// a termination signal and the time when the processes are forcibly halted with a kill signal.
+	// Set this value longer than the expected cleanup time for your process.
+	// Defaults to 30 seconds.
+	// +optional
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
+
+	// StatefulSetUpdateStrategy indicates the StatefulSetUpdateStrategy that will be
+	// employed to update Pods in the StatefulSet when a revision is made to
+	// Template.
+	// +optional
+	StatefulSetUpdateStrategy apps.StatefulSetUpdateStrategyType `json:"statefulSetUpdateStrategy,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -677,6 +825,15 @@ type ServiceSpec struct {
 	// PortName is the name of service port
 	// +optional
 	PortName *string `json:"portName,omitempty"`
+
+	// LoadBalancerSourceRanges is the loadBalancerSourceRanges of service
+	// If specified and supported by the platform, this will restrict traffic through the cloud-provider
+	// load-balancer will be restricted to the specified client IPs. This field will be ignored if the
+	// cloud-provider does not support the feature."
+	// More info: https://kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/
+	// Optional: Defaults to omitted
+	// +optional
+	LoadBalancerSourceRanges []string `json:"loadBalancerSourceRanges,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -693,6 +850,16 @@ type TiDBServiceSpec struct {
 	// Optional: Defaults to true
 	// +optional
 	ExposeStatus *bool `json:"exposeStatus,omitempty"`
+
+	// Expose the tidb cluster mysql port to MySQLNodePort
+	// Optional: Defaults to 0
+	// +optional
+	MySQLNodePort *int `json:"mysqlNodePort,omitempty"`
+
+	// Expose the tidb status node port to StatusNodePort
+	// Optional: Defaults to 0
+	// +optional
+	StatusNodePort *int `json:"statusNodePort,omitempty"`
 }
 
 // +k8s:openapi-gen=false
@@ -993,12 +1160,14 @@ type BackupType string
 const (
 	// BackupTypeFull represents the full backup of tidb cluster.
 	BackupTypeFull BackupType = "full"
-	// BackupTypeInc represents the incremental backup of tidb cluster.
-	BackupTypeInc BackupType = "incremental"
+	// BackupTypeRaw represents the raw backup of tidb cluster.
+	BackupTypeRaw BackupType = "raw"
 	// BackupTypeDB represents the backup of one DB for the tidb cluster.
 	BackupTypeDB BackupType = "db"
 	// BackupTypeTable represents the backup of one table for the tidb cluster.
 	BackupTypeTable BackupType = "table"
+	// BackupTypeTiFlashReplica represents restoring the tiflash replica removed by a failed restore of the older version BR
+	BackupTypeTiFlashReplica BackupType = "tiflash-replica"
 )
 
 // +k8s:openapi-gen=true
@@ -1017,6 +1186,19 @@ type TiDBAccessConfig struct {
 	// +optional
 	TLSClientSecretName *string `json:"tlsClientSecretName,omitempty"`
 }
+
+// +k8s:openapi-gen=true
+// CleanPolicyType represents the clean policy of backup data in remote storage
+type CleanPolicyType string
+
+const (
+	// CleanPolicyTypeRetain represents that the backup data in remote storage will be retained when the Backup CR is deleted
+	CleanPolicyTypeRetain CleanPolicyType = "Retain"
+	// CleanPolicyTypeOnFailure represents that the backup data in remote storage will be cleaned only for the failed backups when the Backup CR is deleted
+	CleanPolicyTypeOnFailure CleanPolicyType = "OnFailure"
+	// CleanPolicyTypeIfFailed represents that the backup data in remote storage will be cleaned when the Backup CR is deleted
+	CleanPolicyTypeDelete CleanPolicyType = "Delete"
+)
 
 // +k8s:openapi-gen=true
 // BackupSpec contains the backup specification for a tidb cluster.
@@ -1040,11 +1222,16 @@ type BackupSpec struct {
 	StorageSize string `json:"storageSize,omitempty"`
 	// BRConfig is the configs for BR
 	BR *BRConfig `json:"br,omitempty"`
-	// MydumperConfig is the configs for mydumper
-	Mydumper *MydumperConfig `json:"mydumper,omitempty"`
+	// DumplingConfig is the configs for dumpling
+	Dumpling *DumplingConfig `json:"dumpling,omitempty"`
 	// Base tolerations of backup Pods, components may add more tolerations upon this respectively
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	// TableFilter means Table filter expression for 'db.table' matching. BR supports this from v4.0.3.
+	TableFilter []string `json:"tableFilter,omitempty"`
 	// Affinity of backup Pods
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
@@ -1052,15 +1239,17 @@ type BackupSpec struct {
 	UseKMS bool `json:"useKMS,omitempty"`
 	// Specify service account of backup
 	ServiceAccount string `json:"serviceAccount,omitempty"`
+	// CleanPolicy denotes whether to clean backup data when the object is deleted from the cluster, if not set, the backup data will be retained
+	CleanPolicy CleanPolicyType `json:"cleanPolicy,omitempty"`
 }
 
 // +k8s:openapi-gen=true
-// MydumperConfig contains config for mydumper
-type MydumperConfig struct {
-	// Options means options for backup data to remote storage with mydumper.
+// DumplingConfig contains config for dumpling
+type DumplingConfig struct {
+	// Options means options for backup data to remote storage with dumpling.
 	Options []string `json:"options,omitempty"`
-	// TableRegex means Regular expression for 'db.table' matching
-	TableRegex *string `json:"tableRegex,omitempty"`
+	// Deprecated. Please use `Spec.TableFilter` instead. TableFilter means Table filter expression for 'db.table' matching
+	TableFilter []string `json:"tableFilter,omitempty"`
 }
 
 // +k8s:openapi-gen=true
@@ -1070,9 +1259,9 @@ type BRConfig struct {
 	Cluster string `json:"cluster"`
 	// Namespace of backup/restore cluster
 	ClusterNamespace string `json:"clusterNamespace,omitempty"`
-	// DB is the specific DB which will be backed-up or restored
+	// Deprecated from BR v4.0.3. Please use `Spec.TableFilter` instead. DB is the specific DB which will be backed-up or restored
 	DB string `json:"db,omitempty"`
-	// Table is the specific table which will be backed-up or restored
+	// Deprecated from BR v4.0.3. Please use `Spec.TableFilter` instead. Table is the specific table which will be backed-up or restored
 	Table string `json:"table,omitempty"`
 	// LogLevel is the log level
 	LogLevel string `json:"logLevel,omitempty"`
@@ -1090,6 +1279,8 @@ type BRConfig struct {
 	SendCredToTikv *bool `json:"sendCredToTikv,omitempty"`
 	// OnLine specifies whether online during restore
 	OnLine *bool `json:"onLine,omitempty"`
+	// Options means options for backup data to remote storage with BR. These options has highest priority.
+	Options []string `json:"options,omitempty"`
 }
 
 // BackupConditionType represents a valid condition of a Backup.
@@ -1111,6 +1302,8 @@ const (
 	BackupRetryFailed BackupConditionType = "RetryFailed"
 	// BackupInvalid means invalid backup CR
 	BackupInvalid BackupConditionType = "Invalid"
+	// BackupPrepare means the backup prepare backup process
+	BackupPrepare BackupConditionType = "Prepare"
 )
 
 // BackupCondition describes the observed state of a Backup at a certain point.
@@ -1130,11 +1323,16 @@ type BackupStatus struct {
 	TimeStarted metav1.Time `json:"timeStarted"`
 	// TimeCompleted is the time at which the backup was completed.
 	TimeCompleted metav1.Time `json:"timeCompleted"`
+	// BackupSizeReadable is the data size of the backup.
+	// the difference with BackupSize is that its format is human readable
+	BackupSizeReadable string `json:"backupSizeReadable"`
 	// BackupSize is the data size of the backup.
 	BackupSize int64 `json:"backupSize"`
 	// CommitTs is the snapshot time point of tidb cluster.
-	CommitTs   string            `json:"commitTs"`
-	Conditions []BackupCondition `json:"conditions"`
+	CommitTs string `json:"commitTs"`
+	// Phase is a user readable state inferred from the underlying Backup conditions
+	Phase      BackupConditionType `json:"phase"`
+	Conditions []BackupCondition   `json:"conditions"`
 }
 
 // +genclient
@@ -1183,6 +1381,9 @@ type BackupScheduleSpec struct {
 	StorageClassName *string `json:"storageClassName,omitempty"`
 	// StorageSize is the request storage size for backup job
 	StorageSize string `json:"storageSize,omitempty"`
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
 // BackupScheduleStatus represents the current state of a BackupSchedule.
@@ -1282,6 +1483,11 @@ type RestoreSpec struct {
 	UseKMS bool `json:"useKMS,omitempty"`
 	// Specify service account of restore
 	ServiceAccount string `json:"serviceAccount,omitempty"`
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	// TableFilter means Table filter expression for 'db.table' matching. BR supports this from v4.0.3.
+	TableFilter []string `json:"tableFilter,omitempty"`
 }
 
 // RestoreStatus represents the current status of a tidb cluster restore.
@@ -1289,8 +1495,12 @@ type RestoreStatus struct {
 	// TimeStarted is the time at which the restore was started.
 	TimeStarted metav1.Time `json:"timeStarted"`
 	// TimeCompleted is the time at which the restore was completed.
-	TimeCompleted metav1.Time        `json:"timeCompleted"`
-	Conditions    []RestoreCondition `json:"conditions"`
+	TimeCompleted metav1.Time `json:"timeCompleted"`
+	// CommitTs is the snapshot time point of tidb cluster.
+	CommitTs string `json:"commitTs"`
+	// Phase is a user readable state inferred from the underlying Restore conditions
+	Phase      RestoreConditionType `json:"phase"`
+	Conditions []RestoreCondition   `json:"conditions"`
 }
 
 // +k8s:openapi-gen=true
@@ -1309,4 +1519,12 @@ type IngressSpec struct {
 	// ingress supports SNI.
 	// +optional
 	TLS []extensionsv1beta1.IngressTLS `json:"tls,omitempty"`
+}
+
+// StorageVolume is TiKV storage information
+type StorageVolume struct {
+	Name             string  `json:"name"`
+	StorageClassName *string `json:"storageClassName,omitempty"`
+	StorageSize      string  `json:"storageSize"`
+	MountPath        string  `json:"mountPath"`
 }

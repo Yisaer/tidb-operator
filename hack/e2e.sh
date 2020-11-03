@@ -64,6 +64,7 @@ Environments:
     GCR_IO_MIRROR         configure mirror for gcr.io
     QUAY_IO_MIRROR        configure mirror for quay.io
     KIND_DATA_HOSTPATH    (kind only) the host path of data directory for kind cluster, defaults: none
+    KIND_ETCD_DATADIR     (kind only) the host path of etcd data directory for kind cluster, defaults: none
     GCP_PROJECT           (gke only) the GCP project to run in
     GCP_CREDENTIALS       (gke only) the GCP service account to use
     GCP_REGION            (gke only) the GCP region, if specified a regional cluster is creaetd
@@ -187,6 +188,7 @@ SKIP_TEST=${SKIP_TEST:-}
 SKIP_DUMP=${SKIP_DUMP:-}
 REUSE_CLUSTER=${REUSE_CLUSTER:-}
 KIND_DATA_HOSTPATH=${KIND_DATA_HOSTPATH:-none}
+KIND_ETCD_DATADIR=${KIND_ETCD_DATADIR:-none}
 GCP_PROJECT=${GCP_PROJECT:-}
 GCP_CREDENTIALS=${GCP_CREDENTIALS:-}
 GCP_REGION=${GCP_REGION:-}
@@ -198,7 +200,7 @@ AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
 AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
 AWS_REGION=${AWS_REGION:-}
 AWS_ZONE=${AWS_ZONE:-}
-KUBE_VERSION=${KUBE_VERSION:-v1.12.10}
+KUBE_VERSION=${KUBE_VERSION:-v1.18.2}
 KUBE_WORKERS=${KUBE_WORKERS:-3}
 DOCKER_IO_MIRROR=${DOCKER_IO_MIRROR:-}
 GCR_IO_MIRROR=${GCR_IO_MIRROR:-}
@@ -219,6 +221,7 @@ echo "SKIP_DOWN: $SKIP_DOWN"
 echo "SKIP_TEST: $SKIP_TEST"
 echo "SKIP_DUMP: $SKIP_DUMP"
 echo "KIND_DATA_HOSTPATH: $KIND_DATA_HOSTPATH"
+echo "KIND_ETCD_DATADIR: $KIND_ETCD_DATADIR"
 echo "GCP_PROJECT: $GCP_PROJECT"
 echo "GCP_CREDENTIALS: $GCP_CREDENTIALS"
 echo "GCP_REGION: $GCP_REGION"
@@ -305,9 +308,6 @@ kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
   apiVersion: kubeadm.k8s.io/v1beta1
-  apiServer:
-    extraArgs:
-      v: "4"
   scheduler:
     extraArgs:
       v: "4"
@@ -317,9 +317,6 @@ kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
   apiVersion: kubeadm.k8s.io/v1beta2
-  apiServer:
-    extraArgs:
-      v: "4"
   scheduler:
     extraArgs:
       v: "4"
@@ -330,8 +327,6 @@ kubeadmConfigPatches:
   # backward compatibility for Kubernetes 1.12 and prior versions
   kind: ClusterConfiguration
   apiVersion: kubeadm.k8s.io/v1alpha3
-  apiServerExtraArgs:
-    v: "4"
   schedulerExtraArgs:
     v: "4"
   controllerManagerExtraArgs:
@@ -366,19 +361,33 @@ EOF
 nodes:
 - role: control-plane
 EOF
-    if [[ "$KIND_DATA_HOSTPATH" != "none" ]]; then
-        if [ ! -d "$KIND_DATA_HOSTPATH" ]; then
-            echo "error: '$KIND_DATA_HOSTPATH' is not a directory"
-            exit 1
-        fi
-        local hostWorkerPath="${KIND_DATA_HOSTPATH}/control-plane"
-        test -d $hostWorkerPath || mkdir $hostWorkerPath
+    if [[ "$KIND_DATA_HOSTPATH" != "none" || "$KIND_ETCD_DATADIR" != "none" ]]; then
         cat <<EOF >> $tmpfile
   extraMounts:
+EOF
+        if [[ "$KIND_DATA_HOSTPATH" != "none" ]]; then
+            if [ ! -d "$KIND_DATA_HOSTPATH" ]; then
+                echo "error: '$KIND_DATA_HOSTPATH' is not a directory"
+                exit 1
+            fi
+            local hostWorkerPath="${KIND_DATA_HOSTPATH}/control-plane"
+            test -d $hostWorkerPath || mkdir $hostWorkerPath
+            cat <<EOF >> $tmpfile
   - containerPath: /mnt/disks/
     hostPath: "$hostWorkerPath"
     propagation: HostToContainer
 EOF
+        fi
+        if [[ "$KIND_ETCD_DATADIR" != "none" ]]; then
+            if [ ! -d "$KIND_ETCD_DATADIR" ]; then
+                echo "error: '$KIND_ETCD_DATADIR' is not a directory"
+                exit 1
+            fi
+            cat <<EOF >> $tmpfile
+  - containerPath: /var/lib/etcd
+    hostPath: "$KIND_ETCD_DATADIR"
+EOF
+        fi
     fi
     # workers
     for ((i = 1; i <= $KUBE_WORKERS; i++)) {

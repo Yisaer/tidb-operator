@@ -19,38 +19,40 @@ import (
 	"github.com/pingcap/advanced-statefulset/client/apis/apps/v1/helper"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
-	"github.com/pingcap/tidb-operator/pkg/pdapi"
 	apps "k8s.io/api/apps/v1"
-	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 )
 
 type pdUpgrader struct {
-	pdControl  pdapi.PDControlInterface
-	podControl controller.PodControlInterface
-	podLister  corelisters.PodLister
+	deps *controller.Dependencies
 }
 
 // NewPDUpgrader returns a pdUpgrader
-func NewPDUpgrader(pdControl pdapi.PDControlInterface,
-	podControl controller.PodControlInterface,
-	podLister corelisters.PodLister) Upgrader {
+func NewPDUpgrader(deps *controller.Dependencies) Upgrader {
 	return &pdUpgrader{
-		pdControl:  pdControl,
-		podControl: podControl,
-		podLister:  podLister,
+		deps: deps,
 	}
 }
 
-func (pu *pdUpgrader) Upgrade(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
-	return pu.gracefulUpgrade(tc, oldSet, newSet)
+func (u *pdUpgrader) Upgrade(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
+	return u.gracefulUpgrade(tc, oldSet, newSet)
 }
 
-func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
+func (u *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 	if !tc.Status.PD.Synced {
 		return fmt.Errorf("tidbcluster: [%s/%s]'s pd status sync failed,can not to be upgraded", ns, tcName)
+	}
+	if tc.PDScaling() {
+		klog.Infof("TidbCluster: [%s/%s]'s pd is scaling, can not upgrade pd",
+			ns, tcName)
+		_, podSpec, err := GetLastAppliedConfig(oldSet)
+		if err != nil {
+			return err
+		}
+		newSet.Spec.Template.Spec = *podSpec
+		return nil
 	}
 
 	tc.Status.PD.Phase = v1alpha1.UpgradePhase
@@ -72,19 +74,14 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 		return nil
 	}
 
-	if controller.PodWebhookEnabled {
-		setUpgradePartition(newSet, 0)
-		return nil
-	}
-
 	setUpgradePartition(newSet, *oldSet.Spec.UpdateStrategy.RollingUpdate.Partition)
 	podOrdinals := helper.GetPodOrdinals(*oldSet.Spec.Replicas, oldSet).List()
 	for _i := len(podOrdinals) - 1; _i >= 0; _i-- {
 		i := podOrdinals[_i]
 		podName := PdPodName(tcName, i)
-		pod, err := pu.podLister.Pods(ns).Get(podName)
+		pod, err := u.deps.PodLister.Pods(ns).Get(podName)
 		if err != nil {
-			return err
+			return fmt.Errorf("gracefulUpgrade: failed to get pods %s for cluster %s/%s, error: %s", podName, ns, tcName, err)
 		}
 
 		revision, exist := pod.Labels[apps.ControllerRevisionHashLabelKey]
@@ -99,25 +96,30 @@ func (pu *pdUpgrader) gracefulUpgrade(tc *v1alpha1.TidbCluster, oldSet *apps.Sta
 			continue
 		}
 
-		return pu.upgradePDPod(tc, i, newSet)
+		if u.deps.CLIConfig.PodWebhookEnabled {
+			setUpgradePartition(newSet, i)
+			return nil
+		}
+
+		return u.upgradePDPod(tc, i, newSet)
 	}
 
 	return nil
 }
 
-func (pu *pdUpgrader) upgradePDPod(tc *v1alpha1.TidbCluster, ordinal int32, newSet *apps.StatefulSet) error {
+func (u *pdUpgrader) upgradePDPod(tc *v1alpha1.TidbCluster, ordinal int32, newSet *apps.StatefulSet) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 	upgradePodName := PdPodName(tcName, ordinal)
 	if tc.Status.PD.Leader.Name == upgradePodName && tc.PDStsActualReplicas() > 1 {
-		lastOrdinal := tc.PDStsActualReplicas() - 1
+		lastOrdinal := helper.GetMaxPodOrdinal(*newSet.Spec.Replicas, newSet)
 		var targetName string
 		if ordinal == lastOrdinal {
-			targetName = PdPodName(tcName, 0)
+			targetName = PdPodName(tcName, helper.GetMinPodOrdinal(*newSet.Spec.Replicas, newSet))
 		} else {
 			targetName = PdPodName(tcName, lastOrdinal)
 		}
-		err := pu.transferPDLeaderTo(tc, targetName)
+		err := u.transferPDLeaderTo(tc, targetName)
 		if err != nil {
 			klog.Errorf("pd upgrader: failed to transfer pd leader to: %s, %v", targetName, err)
 			return err
@@ -130,8 +132,8 @@ func (pu *pdUpgrader) upgradePDPod(tc *v1alpha1.TidbCluster, ordinal int32, newS
 	return nil
 }
 
-func (pu *pdUpgrader) transferPDLeaderTo(tc *v1alpha1.TidbCluster, targetName string) error {
-	return controller.GetPDClient(pu.pdControl, tc).TransferPDLeader(targetName)
+func (u *pdUpgrader) transferPDLeaderTo(tc *v1alpha1.TidbCluster, targetName string) error {
+	return controller.GetPDClient(u.deps.PDControl, tc).TransferPDLeader(targetName)
 }
 
 type fakePDUpgrader struct{}
@@ -141,7 +143,7 @@ func NewFakePDUpgrader() Upgrader {
 	return &fakePDUpgrader{}
 }
 
-func (fpu *fakePDUpgrader) Upgrade(tc *v1alpha1.TidbCluster, _ *apps.StatefulSet, _ *apps.StatefulSet) error {
+func (u *fakePDUpgrader) Upgrade(tc *v1alpha1.TidbCluster, _ *apps.StatefulSet, _ *apps.StatefulSet) error {
 	if !tc.Status.PD.Synced {
 		return fmt.Errorf("tidbcluster: pd status sync failed,can not to be upgraded")
 	}

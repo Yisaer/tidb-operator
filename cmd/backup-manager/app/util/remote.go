@@ -58,18 +58,18 @@ type gcsQuery struct {
 }
 
 // NewRemoteStorage creates new remote storage
-func NewRemoteStorage(backup *v1alpha1.Backup) (*blob.Bucket, error) {
-	st := util.GetStorageType(backup.Spec.StorageProvider)
+func NewRemoteStorage(provider v1alpha1.StorageProvider) (*blob.Bucket, error) {
+	st := util.GetStorageType(provider)
 	switch st {
 	case v1alpha1.BackupStorageTypeS3:
-		qs := checkS3Config(backup.Spec.S3, true)
+		qs := checkS3Config(provider.S3, true)
 		bucket, err := newS3Storage(qs)
 		if err != nil {
 			return nil, err
 		}
 		return bucket, nil
 	case v1alpha1.BackupStorageTypeGcs:
-		qs := checkGcsConfig(backup.Spec.Gcs, true)
+		qs := checkGcsConfig(provider.Gcs, true)
 		bucket, err := newGcsStorage(qs)
 		if err != nil {
 			return nil, err
@@ -81,24 +81,24 @@ func NewRemoteStorage(backup *v1alpha1.Backup) (*blob.Bucket, error) {
 }
 
 // getRemoteStorage returns the arg for --storage option and the remote path for br
-func getRemoteStorage(provider v1alpha1.StorageProvider) ([]string, string, error) {
+func getRemoteStorage(provider v1alpha1.StorageProvider) ([]string, error) {
 	st := util.GetStorageType(provider)
 	switch st {
 	case v1alpha1.BackupStorageTypeS3:
 		qs := checkS3Config(provider.S3, false)
-		s, path := newS3StorageOption(qs)
-		return s, path, nil
+		s := newS3StorageOption(qs)
+		return s, nil
 	case v1alpha1.BackupStorageTypeGcs:
 		qs := checkGcsConfig(provider.Gcs, false)
-		s, path := newGcsStorageOption(qs)
-		return s, path, nil
+		s := newGcsStorageOption(qs)
+		return s, nil
 	default:
-		return nil, "", fmt.Errorf("storage %s not support yet", st)
+		return nil, fmt.Errorf("storage %s not support yet", st)
 	}
 }
 
 // newS3StorageOption constructs the arg for --storage option and the remote path for br
-func newS3StorageOption(qs *s3Query) ([]string, string) {
+func newS3StorageOption(qs *s3Query) []string {
 	var s3options []string
 	var path string
 	if qs.prefix == "/" {
@@ -125,7 +125,7 @@ func newS3StorageOption(qs *s3Query) ([]string, string) {
 	if qs.storageClass != "" {
 		s3options = append(s3options, fmt.Sprintf("--s3.storage-class=%s", qs.storageClass))
 	}
-	return s3options, path
+	return s3options
 }
 
 // newS3Storage initialize a new s3 storage
@@ -183,7 +183,7 @@ func newGcsStorage(qs *gcsQuery) (*blob.Bucket, error) {
 }
 
 // newGcsStorageOption constructs the arg for --storage option and the remote path for br
-func newGcsStorageOption(qs *gcsQuery) ([]string, string) {
+func newGcsStorageOption(qs *gcsQuery) []string {
 	var gcsoptions []string
 	var path string
 	if qs.prefix == "/" {
@@ -198,7 +198,7 @@ func newGcsStorageOption(qs *gcsQuery) ([]string, string) {
 	if qs.objectAcl != "" {
 		gcsoptions = append(gcsoptions, fmt.Sprintf("--gcs.predefined-acl=%s", qs.objectAcl))
 	}
-	return gcsoptions, path
+	return gcsoptions
 }
 
 // checkS3Config constructs s3Query parameters

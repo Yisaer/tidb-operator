@@ -14,22 +14,25 @@
 package member
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"path"
 
-	"github.com/BurntSushi/toml"
 	"github.com/pingcap/advanced-statefulset/client/apis/apps/v1/helper"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/pkg/util"
+	"github.com/pingcap/tidb-operator/pkg/util/toml"
 	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
+	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
 const (
@@ -149,16 +152,6 @@ func setUpgradePartition(set *apps.StatefulSet, upgradeOrdinal int32) {
 	klog.Infof("set %s/%s partition to %d", set.GetNamespace(), set.GetName(), upgradeOrdinal)
 }
 
-func imagePullFailed(pod *corev1.Pod) bool {
-	for _, container := range pod.Status.ContainerStatuses {
-		if container.State.Waiting != nil && container.State.Waiting.Reason != "" &&
-			(container.State.Waiting.Reason == ImagePullBackOff || container.State.Waiting.Reason == ErrImagePull) {
-			return true
-		}
-	}
-	return false
-}
-
 func MemberPodName(tcName string, ordinal int32, memberType v1alpha1.MemberType) string {
 	return fmt.Sprintf("%s-%s-%d", tcName, memberType.String(), ordinal)
 }
@@ -210,14 +203,7 @@ func FindConfigMapVolume(podSpec *corev1.PodSpec, pred func(string) bool) string
 
 // MarshalTOML is a template function that try to marshal a go value to toml
 func MarshalTOML(v interface{}) ([]byte, error) {
-	buff := new(bytes.Buffer)
-	encoder := toml.NewEncoder(buff)
-	err := encoder.Encode(v)
-	if err != nil {
-		return nil, err
-	}
-	data := buff.Bytes()
-	return data, nil
+	return toml.Marshal(v)
 }
 
 func UnmarshalTOML(b []byte, obj interface{}) error {
@@ -321,10 +307,6 @@ func updateStatefulSet(setCtl controller.StatefulSetControlInterface, tc *v1alph
 	return nil
 }
 
-func clusterSecretName(tc *v1alpha1.TidbCluster, component string) string {
-	return fmt.Sprintf("%s-%s-cluster-secret", tc.Name, component)
-}
-
 // filter targetContainer by  containerName, If not find, then return nil
 func filterContainer(sts *apps.StatefulSet, containerName string) *corev1.Container {
 	for _, c := range sts.Spec.Template.Spec.Containers {
@@ -344,4 +326,83 @@ func copyAnnotations(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
+}
+
+func getTikVConfigMapForTiKVSpec(tikvSpec *v1alpha1.TiKVSpec, tc *v1alpha1.TidbCluster, scriptModel *TiKVStartScriptModel) (*corev1.ConfigMap, error) {
+	config := tikvSpec.Config
+	if tc.IsTLSClusterEnabled() {
+		config.Set("security.ca-path", path.Join(tikvClusterCertPath, tlsSecretRootCAKey))
+		config.Set("security.cert-path", path.Join(tikvClusterCertPath, corev1.TLSCertKey))
+		config.Set("security.key-path", path.Join(tikvClusterCertPath, corev1.TLSPrivateKeyKey))
+	}
+	confText, err := config.MarshalTOML()
+	if err != nil {
+		return nil, err
+	}
+	startScript, err := RenderTiKVStartScript(scriptModel)
+	if err != nil {
+		return nil, err
+	}
+	cm := &corev1.ConfigMap{
+		Data: map[string]string{
+			"config-file":    transformTiKVConfigMap(string(confText), tc),
+			"startup-script": startScript,
+		},
+	}
+	return cm, nil
+}
+
+// shouldRecover checks whether we should perform recovery operation.
+func shouldRecover(tc *v1alpha1.TidbCluster, component string, podLister corelisters.PodLister) bool {
+	var stores map[string]v1alpha1.TiKVStore
+	var failureStores map[string]v1alpha1.TiKVFailureStore
+	var ordinals sets.Int32
+	var podPrefix string
+
+	switch component {
+	case label.TiKVLabelVal:
+		stores = tc.Status.TiKV.Stores
+		failureStores = tc.Status.TiKV.FailureStores
+		ordinals = tc.TiKVStsDesiredOrdinals(true)
+		podPrefix = controller.TiKVMemberName(tc.Name)
+	case label.TiFlashLabelVal:
+		stores = tc.Status.TiFlash.Stores
+		failureStores = tc.Status.TiFlash.FailureStores
+		ordinals = tc.TiFlashStsDesiredOrdinals(true)
+		podPrefix = controller.TiFlashMemberName(tc.Name)
+	default:
+		klog.Warningf("Unexpected component %s for %s/%s in shouldRecover", component, tc.Namespace, tc.Name)
+		return false
+	}
+	if failureStores == nil {
+		return false
+	}
+	// If all desired replicas (excluding failover pods) of tidb cluster are
+	// healthy, we can perform our failover recovery operation.
+	// Note that failover pods may fail (e.g. lack of resources) and we don't care
+	// about them because we're going to delete them.
+	for ordinal := range ordinals {
+		name := fmt.Sprintf("%s-%d", podPrefix, ordinal)
+		pod, err := podLister.Pods(tc.Namespace).Get(name)
+		if err != nil {
+			klog.Errorf("pod %s/%s does not exist: %v", tc.Namespace, name, err)
+			return false
+		}
+		if !podutil.IsPodReady(pod) {
+			return false
+		}
+		var exist bool
+		for _, v := range stores {
+			if v.PodName == pod.Name {
+				exist = true
+				if v.State != v1alpha1.TiKVStateUp {
+					return false
+				}
+			}
+		}
+		if !exist {
+			return false
+		}
+	}
+	return true
 }

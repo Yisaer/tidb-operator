@@ -9,7 +9,7 @@ variable "tidb_operator_id" {
 variable "cluster_name" {}
 variable "cluster_version" {
   description = "The TiDB cluster version"
-  default     = "v3.0.13"
+  default     = "v4.0.7"
 }
 variable "tidb_cluster_chart_version" {
   description = "The TiDB cluster chart version"
@@ -54,17 +54,17 @@ variable "monitor_instance_type" {
 }
 
 variable "pd_image_type" {
-  description = "PD image type, avaiable: UBUNTU/COS"
+  description = "PD image type, available: UBUNTU/COS"
   default     = "COS"
 }
 
 variable "tidb_image_type" {
-  description = "TiDB image type, avaiable: UBUNTU/COS"
+  description = "TiDB image type, available: UBUNTU/COS"
   default     = "COS"
 }
 
 variable "tikv_image_type" {
-  description = "TiKV image type, avaiable: UBUNTU/COS"
+  description = "TiKV image type, available: UBUNTU/COS"
   default     = "COS"
 }
 

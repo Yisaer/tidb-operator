@@ -14,6 +14,7 @@
 package v1alpha1
 
 import (
+	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -25,6 +26,7 @@ const (
 // and component-level overrides
 type ComponentAccessor interface {
 	ImagePullPolicy() corev1.PullPolicy
+	ImagePullSecrets() []corev1.LocalObjectReference
 	HostNetwork() bool
 	Affinity() *corev1.Affinity
 	PriorityClassName() *string
@@ -37,14 +39,32 @@ type ComponentAccessor interface {
 	ConfigUpdateStrategy() ConfigUpdateStrategy
 	BuildPodSpec() corev1.PodSpec
 	Env() []corev1.EnvVar
+	AdditionalContainers() []corev1.Container
+	AdditionalVolumes() []corev1.Volume
+	TerminationGracePeriodSeconds() *int64
+	StatefulSetUpdateStrategy() apps.StatefulSetUpdateStrategyType
 }
 
 type componentAccessorImpl struct {
-	// Cluster is the TidbCluster Spec
+	// ClusterSpec is the TidbCluster Spec
 	ClusterSpec *TidbClusterSpec
 
-	// Cluster is the Component Spec
+	// ComponentSpec is the Component Spec
 	ComponentSpec *ComponentSpec
+}
+
+func (a *componentAccessorImpl) StatefulSetUpdateStrategy() apps.StatefulSetUpdateStrategyType {
+	strategy := a.ComponentSpec.StatefulSetUpdateStrategy
+	if len(strategy) != 0 {
+		return strategy
+	}
+
+	strategy = a.ClusterSpec.StatefulSetUpdateStrategy
+	if len(strategy) != 0 {
+		return strategy
+	}
+
+	return apps.RollingUpdateStatefulSetStrategyType
 }
 
 func (a *componentAccessorImpl) PodSecurityContext() *corev1.PodSecurityContext {
@@ -57,6 +77,14 @@ func (a *componentAccessorImpl) ImagePullPolicy() corev1.PullPolicy {
 		return a.ClusterSpec.ImagePullPolicy
 	}
 	return *pp
+}
+
+func (a *componentAccessorImpl) ImagePullSecrets() []corev1.LocalObjectReference {
+	ips := a.ComponentSpec.ImagePullSecrets
+	if ips == nil {
+		return a.ClusterSpec.ImagePullSecrets
+	}
+	return ips
 }
 
 func (a *componentAccessorImpl) HostNetwork() bool {
@@ -158,11 +186,29 @@ func (a *componentAccessorImpl) BuildPodSpec() corev1.PodSpec {
 	if a.PriorityClassName() != nil {
 		spec.PriorityClassName = *a.PriorityClassName()
 	}
+	if a.ImagePullSecrets() != nil {
+		spec.ImagePullSecrets = a.ImagePullSecrets()
+	}
+	if a.TerminationGracePeriodSeconds() != nil {
+		spec.TerminationGracePeriodSeconds = a.TerminationGracePeriodSeconds()
+	}
 	return spec
 }
 
 func (a *componentAccessorImpl) Env() []corev1.EnvVar {
 	return a.ComponentSpec.Env
+}
+
+func (a *componentAccessorImpl) AdditionalContainers() []corev1.Container {
+	return a.ComponentSpec.AdditionalContainers
+}
+
+func (a *componentAccessorImpl) AdditionalVolumes() []corev1.Volume {
+	return a.ComponentSpec.AdditionalVolumes
+}
+
+func (a *componentAccessorImpl) TerminationGracePeriodSeconds() *int64 {
+	return a.ComponentSpec.TerminationGracePeriodSeconds
 }
 
 // BaseTiDBSpec returns the base spec of TiDB servers

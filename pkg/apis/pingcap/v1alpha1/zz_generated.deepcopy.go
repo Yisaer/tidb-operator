@@ -21,7 +21,6 @@ import (
 	time "time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	v2beta2 "k8s.io/api/autoscaling/v2beta2"
 	v1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	v1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -55,6 +54,11 @@ func (in *BRConfig) DeepCopyInto(out *BRConfig) {
 		in, out := &in.OnLine, &out.OnLine
 		*out = new(bool)
 		**out = **in
+	}
+	if in.Options != nil {
+		in, out := &in.Options, &out.Options
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 	return
 }
@@ -227,6 +231,11 @@ func (in *BackupScheduleSpec) DeepCopyInto(out *BackupScheduleSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -285,9 +294,9 @@ func (in *BackupSpec) DeepCopyInto(out *BackupSpec) {
 		*out = new(BRConfig)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Mydumper != nil {
-		in, out := &in.Mydumper, &out.Mydumper
-		*out = new(MydumperConfig)
+	if in.Dumpling != nil {
+		in, out := &in.Dumpling, &out.Dumpling
+		*out = new(DumplingConfig)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Tolerations != nil {
@@ -296,6 +305,16 @@ func (in *BackupSpec) DeepCopyInto(out *BackupSpec) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
+	}
+	if in.TableFilter != nil {
+		in, out := &in.TableFilter, &out.TableFilter
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 	if in.Affinity != nil {
 		in, out := &in.Affinity, &out.Affinity
@@ -360,7 +379,7 @@ func (in *BasicAutoScalerSpec) DeepCopyInto(out *BasicAutoScalerSpec) {
 	}
 	if in.Metrics != nil {
 		in, out := &in.Metrics, &out.Metrics
-		*out = make([]v2beta2.MetricSpec, len(*in))
+		*out = make([]CustomMetric, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -368,16 +387,6 @@ func (in *BasicAutoScalerSpec) DeepCopyInto(out *BasicAutoScalerSpec) {
 	if in.MetricsTimeDuration != nil {
 		in, out := &in.MetricsTimeDuration, &out.MetricsTimeDuration
 		*out = new(string)
-		**out = **in
-	}
-	if in.ScaleOutThreshold != nil {
-		in, out := &in.ScaleOutThreshold, &out.ScaleOutThreshold
-		*out = new(int32)
-		**out = **in
-	}
-	if in.ScaleInThreshold != nil {
-		in, out := &in.ScaleInThreshold, &out.ScaleInThreshold
-		*out = new(int32)
 		**out = **in
 	}
 	if in.ExternalEndpoint != nil {
@@ -404,12 +413,9 @@ func (in *BasicAutoScalerStatus) DeepCopyInto(out *BasicAutoScalerStatus) {
 	if in.MetricsStatusList != nil {
 		in, out := &in.MetricsStatusList, &out.MetricsStatusList
 		*out = make([]MetricsStatus, len(*in))
-		copy(*out, *in)
-	}
-	if in.RecommendedReplicas != nil {
-		in, out := &in.RecommendedReplicas, &out.RecommendedReplicas
-		*out = new(int32)
-		**out = **in
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	if in.LastAutoScalingTimestamp != nil {
 		in, out := &in.LastAutoScalingTimestamp, &out.LastAutoScalingTimestamp
@@ -487,8 +493,8 @@ func (in *CommonConfig) DeepCopyInto(out *CommonConfig) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.Path != nil {
-		in, out := &in.Path, &out.Path
+	if in.FlashDataPath != nil {
+		in, out := &in.FlashDataPath, &out.FlashDataPath
 		*out = new(string)
 		**out = **in
 	}
@@ -519,6 +525,16 @@ func (in *CommonConfig) DeepCopyInto(out *CommonConfig) {
 	}
 	if in.HTTPPort != nil {
 		in, out := &in.HTTPPort, &out.HTTPPort
+		*out = new(int32)
+		**out = **in
+	}
+	if in.TCPPortSecure != nil {
+		in, out := &in.TCPPortSecure, &out.TCPPortSecure
+		*out = new(int32)
+		**out = **in
+	}
+	if in.HTTPSPort != nil {
+		in, out := &in.HTTPSPort, &out.HTTPSPort
 		*out = new(int32)
 		**out = **in
 	}
@@ -567,6 +583,11 @@ func (in *CommonConfig) DeepCopyInto(out *CommonConfig) {
 		*out = new(FlashProfile)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Security != nil {
+		in, out := &in.Security, &out.Security
+		*out = new(FlashSecurity)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 
@@ -592,6 +613,11 @@ func (in *ComponentSpec) DeepCopyInto(out *ComponentSpec) {
 		in, out := &in.ImagePullPolicy, &out.ImagePullPolicy
 		*out = new(v1.PullPolicy)
 		**out = **in
+	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
 	}
 	if in.HostNetwork != nil {
 		in, out := &in.HostNetwork, &out.HostNetwork
@@ -650,6 +676,25 @@ func (in *ComponentSpec) DeepCopyInto(out *ComponentSpec) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.AdditionalContainers != nil {
+		in, out := &in.AdditionalContainers, &out.AdditionalContainers
+		*out = make([]v1.Container, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.AdditionalVolumes != nil {
+		in, out := &in.AdditionalVolumes, &out.AdditionalVolumes
+		*out = make([]v1.Volume, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.TerminationGracePeriodSeconds != nil {
+		in, out := &in.TerminationGracePeriodSeconds, &out.TerminationGracePeriodSeconds
+		*out = new(int64)
+		**out = **in
 	}
 	return
 }
@@ -771,6 +816,33 @@ func (in *CrdKinds) DeepCopy() *CrdKinds {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *CustomMetric) DeepCopyInto(out *CustomMetric) {
+	*out = *in
+	in.MetricSpec.DeepCopyInto(&out.MetricSpec)
+	if in.LeastStoragePressurePeriodSeconds != nil {
+		in, out := &in.LeastStoragePressurePeriodSeconds, &out.LeastStoragePressurePeriodSeconds
+		*out = new(int64)
+		**out = **in
+	}
+	if in.LeastRemainAvailableStoragePercent != nil {
+		in, out := &in.LeastRemainAvailableStoragePercent, &out.LeastRemainAvailableStoragePercent
+		*out = new(int64)
+		**out = **in
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new CustomMetric.
+func (in *CustomMetric) DeepCopy() *CustomMetric {
+	if in == nil {
+		return nil
+	}
+	out := new(CustomMetric)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *DashboardConfig) DeepCopyInto(out *DashboardConfig) {
 	*out = *in
 	if in.TiDBCAPath != nil {
@@ -791,6 +863,26 @@ func (in *DashboardConfig) DeepCopyInto(out *DashboardConfig) {
 	if in.PublicPathPrefix != nil {
 		in, out := &in.PublicPathPrefix, &out.PublicPathPrefix
 		*out = new(string)
+		**out = **in
+	}
+	if in.InternalProxy != nil {
+		in, out := &in.InternalProxy, &out.InternalProxy
+		*out = new(bool)
+		**out = **in
+	}
+	if in.DisableTelemetry != nil {
+		in, out := &in.DisableTelemetry, &out.DisableTelemetry
+		*out = new(bool)
+		**out = **in
+	}
+	if in.EnableTelemetry != nil {
+		in, out := &in.EnableTelemetry, &out.EnableTelemetry
+		*out = new(bool)
+		**out = **in
+	}
+	if in.EnableExperimental != nil {
+		in, out := &in.EnableExperimental, &out.EnableExperimental
+		*out = new(bool)
 		**out = **in
 	}
 	return
@@ -883,6 +975,32 @@ func (in *DiscoverySpec) DeepCopy() *DiscoverySpec {
 		return nil
 	}
 	out := new(DiscoverySpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *DumplingConfig) DeepCopyInto(out *DumplingConfig) {
+	*out = *in
+	if in.Options != nil {
+		in, out := &in.Options, &out.Options
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.TableFilter != nil {
+		in, out := &in.TableFilter, &out.TableFilter
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new DumplingConfig.
+func (in *DumplingConfig) DeepCopy() *DumplingConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(DumplingConfig)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -1244,6 +1362,42 @@ func (in *FlashRaft) DeepCopy() *FlashRaft {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *FlashSecurity) DeepCopyInto(out *FlashSecurity) {
+	*out = *in
+	if in.CAPath != nil {
+		in, out := &in.CAPath, &out.CAPath
+		*out = new(string)
+		**out = **in
+	}
+	if in.CertPath != nil {
+		in, out := &in.CertPath, &out.CertPath
+		*out = new(string)
+		**out = **in
+	}
+	if in.KeyPath != nil {
+		in, out := &in.KeyPath, &out.KeyPath
+		*out = new(string)
+		**out = **in
+	}
+	if in.CertAllowedCN != nil {
+		in, out := &in.CertAllowedCN, &out.CertAllowedCN
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new FlashSecurity.
+func (in *FlashSecurity) DeepCopy() *FlashSecurity {
+	if in == nil {
+		return nil
+	}
+	out := new(FlashSecurity)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *FlashServerConfig) DeepCopyInto(out *FlashServerConfig) {
 	*out = *in
 	if in.EngineAddr != nil {
@@ -1253,6 +1407,11 @@ func (in *FlashServerConfig) DeepCopyInto(out *FlashServerConfig) {
 	}
 	if in.StatusAddr != nil {
 		in, out := &in.StatusAddr, &out.StatusAddr
+		*out = new(string)
+		**out = **in
+	}
+	if in.AdvertiseStatusAddr != nil {
+		in, out := &in.AdvertiseStatusAddr, &out.AdvertiseStatusAddr
 		*out = new(string)
 		**out = **in
 	}
@@ -1678,6 +1837,17 @@ func (in *MasterKeyKMSConfig) DeepCopy() *MasterKeyKMSConfig {
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *MetricsStatus) DeepCopyInto(out *MetricsStatus) {
 	*out = *in
+	if in.CurrentValue != nil {
+		in, out := &in.CurrentValue, &out.CurrentValue
+		*out = new(string)
+		**out = **in
+	}
+	if in.ThresholdValue != nil {
+		in, out := &in.ThresholdValue, &out.ThresholdValue
+		*out = new(string)
+		**out = **in
+	}
+	in.StorageMetricsStatus.DeepCopyInto(&out.StorageMetricsStatus)
 	return
 }
 
@@ -1694,7 +1864,7 @@ func (in *MetricsStatus) DeepCopy() *MetricsStatus {
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *MonitorContainer) DeepCopyInto(out *MonitorContainer) {
 	*out = *in
-	in.Resources.DeepCopyInto(&out.Resources)
+	in.ResourceRequirements.DeepCopyInto(&out.ResourceRequirements)
 	if in.ImagePullPolicy != nil {
 		in, out := &in.ImagePullPolicy, &out.ImagePullPolicy
 		*out = new(v1.PullPolicy)
@@ -1709,32 +1879,6 @@ func (in *MonitorContainer) DeepCopy() *MonitorContainer {
 		return nil
 	}
 	out := new(MonitorContainer)
-	in.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
-func (in *MydumperConfig) DeepCopyInto(out *MydumperConfig) {
-	*out = *in
-	if in.Options != nil {
-		in, out := &in.Options, &out.Options
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
-	if in.TableRegex != nil {
-		in, out := &in.TableRegex, &out.TableRegex
-		*out = new(string)
-		**out = **in
-	}
-	return
-}
-
-// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new MydumperConfig.
-func (in *MydumperConfig) DeepCopy() *MydumperConfig {
-	if in == nil {
-		return nil
-	}
-	out := new(MydumperConfig)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -1886,6 +2030,11 @@ func (in *PDConfig) DeepCopyInto(out *PDConfig) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.InitialClusterToken != nil {
+		in, out := &in.InitialClusterToken, &out.InitialClusterToken
+		*out = new(string)
+		**out = **in
+	}
 	if in.LeaderLease != nil {
 		in, out := &in.LeaderLease, &out.LeaderLease
 		*out = new(int64)
@@ -1980,23 +2129,19 @@ func (in *PDConfig) DeepCopyInto(out *PDConfig) {
 	}
 	if in.LabelProperty != nil {
 		in, out := &in.LabelProperty, &out.LabelProperty
-		*out = new(PDLabelPropertyConfig)
-		if **in != nil {
-			in, out := *in, *out
-			*out = make(map[string]PDStoreLabels, len(*in))
-			for key, val := range *in {
-				var outVal []PDStoreLabel
-				if val == nil {
-					(*out)[key] = nil
-				} else {
-					in, out := &val, &outVal
-					*out = make(PDStoreLabels, len(*in))
-					for i := range *in {
-						(*in)[i].DeepCopyInto(&(*out)[i])
-					}
+		*out = make(PDLabelPropertyConfig, len(*in))
+		for key, val := range *in {
+			var outVal []PDStoreLabel
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				in, out := &val, &outVal
+				*out = make(PDStoreLabels, len(*in))
+				for i := range *in {
+					(*in)[i].DeepCopyInto(&(*out)[i])
 				}
-				(*out)[key] = outVal
 			}
+			(*out)[key] = outVal
 		}
 	}
 	if in.NamespaceClassifier != nil {
@@ -2018,6 +2163,26 @@ func (in *PDConfig) DeepCopy() *PDConfig {
 		return nil
 	}
 	out := new(PDConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *PDConfigWraper) DeepCopyInto(out *PDConfigWraper) {
+	*out = *in
+	if in.GenericConfig != nil {
+		in, out := &in.GenericConfig, &out.GenericConfig
+		*out = (*in).DeepCopy()
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new PDConfigWraper.
+func (in *PDConfigWraper) DeepCopy() *PDConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(PDConfigWraper)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -2377,13 +2542,9 @@ func (in *PDScheduleConfig) DeepCopyInto(out *PDScheduleConfig) {
 	}
 	if in.Schedulers != nil {
 		in, out := &in.Schedulers, &out.Schedulers
-		*out = new(PDSchedulerConfigs)
-		if **in != nil {
-			in, out := *in, *out
-			*out = make([]PDSchedulerConfig, len(*in))
-			for i := range *in {
-				(*in)[i].DeepCopyInto(&(*out)[i])
-			}
+		*out = make(PDSchedulerConfigs, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.SchedulersPayload != nil {
@@ -2553,12 +2714,22 @@ func (in *PDSpec) DeepCopyInto(out *PDSpec) {
 	}
 	if in.Config != nil {
 		in, out := &in.Config, &out.Config
-		*out = new(PDConfig)
+		*out = new(PDConfigWraper)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.TLSClientSecretName != nil {
 		in, out := &in.TLSClientSecretName, &out.TLSClientSecretName
 		*out = new(string)
+		**out = **in
+	}
+	if in.EnableDashboardInternalProxy != nil {
+		in, out := &in.EnableDashboardInternalProxy, &out.EnableDashboardInternalProxy
+		*out = new(bool)
+		**out = **in
+	}
+	if in.MountClusterClientSecret != nil {
+		in, out := &in.MountClusterClientSecret, &out.MountClusterClientSecret
+		*out = new(bool)
 		**out = **in
 	}
 	return
@@ -3097,7 +3268,10 @@ func (in *PumpSpec) DeepCopyInto(out *PumpSpec) {
 		*out = new(string)
 		**out = **in
 	}
-	in.GenericConfig.DeepCopyInto(&out.GenericConfig)
+	if in.Config != nil {
+		in, out := &in.Config, &out.Config
+		*out = (*in).DeepCopy()
+	}
 	if in.SetTimeZone != nil {
 		in, out := &in.SetTimeZone, &out.SetTimeZone
 		*out = new(bool)
@@ -3287,6 +3461,16 @@ func (in *RestoreSpec) DeepCopyInto(out *RestoreSpec) {
 		*out = new(v1.Affinity)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
+	}
+	if in.TableFilter != nil {
+		in, out := &in.TableFilter, &out.TableFilter
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -3459,6 +3643,11 @@ func (in *ServiceSpec) DeepCopyInto(out *ServiceSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.LoadBalancerSourceRanges != nil {
+		in, out := &in.LoadBalancerSourceRanges, &out.LoadBalancerSourceRanges
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -3577,6 +3766,46 @@ func (in *StorageClaim) DeepCopy() *StorageClaim {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *StorageMetricsStatus) DeepCopyInto(out *StorageMetricsStatus) {
+	*out = *in
+	if in.StoragePressure != nil {
+		in, out := &in.StoragePressure, &out.StoragePressure
+		*out = new(bool)
+		**out = **in
+	}
+	if in.StoragePressureStartTime != nil {
+		in, out := &in.StoragePressureStartTime, &out.StoragePressureStartTime
+		*out = (*in).DeepCopy()
+	}
+	if in.AvailableStorage != nil {
+		in, out := &in.AvailableStorage, &out.AvailableStorage
+		*out = new(string)
+		**out = **in
+	}
+	if in.CapacityStorage != nil {
+		in, out := &in.CapacityStorage, &out.CapacityStorage
+		*out = new(string)
+		**out = **in
+	}
+	if in.BaselineAvailableStorage != nil {
+		in, out := &in.BaselineAvailableStorage, &out.BaselineAvailableStorage
+		*out = new(string)
+		**out = **in
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new StorageMetricsStatus.
+func (in *StorageMetricsStatus) DeepCopy() *StorageMetricsStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(StorageMetricsStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *StorageProvider) DeepCopyInto(out *StorageProvider) {
 	*out = *in
 	if in.S3 != nil {
@@ -3598,6 +3827,27 @@ func (in *StorageProvider) DeepCopy() *StorageProvider {
 		return nil
 	}
 	out := new(StorageProvider)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *StorageVolume) DeepCopyInto(out *StorageVolume) {
+	*out = *in
+	if in.StorageClassName != nil {
+		in, out := &in.StorageClassName, &out.StorageClassName
+		*out = new(string)
+		**out = **in
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new StorageVolume.
+func (in *StorageVolume) DeepCopy() *StorageVolume {
+	if in == nil {
+		return nil
+	}
+	out := new(StorageVolume)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -3790,6 +4040,11 @@ func (in *TiDBConfig) DeepCopyInto(out *TiDBConfig) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.MaxIndexLength != nil {
+		in, out := &in.MaxIndexLength, &out.MaxIndexLength
+		*out = new(int64)
+		**out = **in
+	}
 	if in.MemQuotaQuery != nil {
 		in, out := &in.MemQuotaQuery, &out.MemQuotaQuery
 		*out = new(int64)
@@ -3950,6 +4205,23 @@ func (in *TiDBConfig) DeepCopyInto(out *TiDBConfig) {
 		*out = new(uint64)
 		**out = **in
 	}
+	if in.SkipRegisterToDashboard != nil {
+		in, out := &in.SkipRegisterToDashboard, &out.SkipRegisterToDashboard
+		*out = new(bool)
+		**out = **in
+	}
+	if in.EnableTelemetry != nil {
+		in, out := &in.EnableTelemetry, &out.EnableTelemetry
+		*out = new(bool)
+		**out = **in
+	}
+	if in.Labels != nil {
+		in, out := &in.Labels, &out.Labels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	return
 }
 
@@ -3959,6 +4231,26 @@ func (in *TiDBConfig) DeepCopy() *TiDBConfig {
 		return nil
 	}
 	out := new(TiDBConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiDBConfigWraper) DeepCopyInto(out *TiDBConfigWraper) {
+	*out = *in
+	if in.GenericConfig != nil {
+		in, out := &in.GenericConfig, &out.GenericConfig
+		*out = (*in).DeepCopy()
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiDBConfigWraper.
+func (in *TiDBConfigWraper) DeepCopy() *TiDBConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(TiDBConfigWraper)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -3998,6 +4290,27 @@ func (in *TiDBMember) DeepCopy() *TiDBMember {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiDBProbe) DeepCopyInto(out *TiDBProbe) {
+	*out = *in
+	if in.Type != nil {
+		in, out := &in.Type, &out.Type
+		*out = new(string)
+		**out = **in
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiDBProbe.
+func (in *TiDBProbe) DeepCopy() *TiDBProbe {
+	if in == nil {
+		return nil
+	}
+	out := new(TiDBProbe)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *TiDBServiceSpec) DeepCopyInto(out *TiDBServiceSpec) {
 	*out = *in
 	in.ServiceSpec.DeepCopyInto(&out.ServiceSpec)
@@ -4009,6 +4322,16 @@ func (in *TiDBServiceSpec) DeepCopyInto(out *TiDBServiceSpec) {
 	if in.ExposeStatus != nil {
 		in, out := &in.ExposeStatus, &out.ExposeStatus
 		*out = new(bool)
+		**out = **in
+	}
+	if in.MySQLNodePort != nil {
+		in, out := &in.MySQLNodePort, &out.MySQLNodePort
+		*out = new(int)
+		**out = **in
+	}
+	if in.StatusNodePort != nil {
+		in, out := &in.StatusNodePort, &out.StatusNodePort
+		*out = new(int)
 		**out = **in
 	}
 	return
@@ -4093,7 +4416,17 @@ func (in *TiDBSpec) DeepCopyInto(out *TiDBSpec) {
 	}
 	if in.Config != nil {
 		in, out := &in.Config, &out.Config
-		*out = new(TiDBConfig)
+		*out = new(TiDBConfigWraper)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Lifecycle != nil {
+		in, out := &in.Lifecycle, &out.Lifecycle
+		*out = new(v1.Lifecycle)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.ReadinessProbe != nil {
+		in, out := &in.ReadinessProbe, &out.ReadinessProbe
+		*out = new(TiDBProbe)
 		(*in).DeepCopyInto(*out)
 	}
 	return
@@ -4161,6 +4494,26 @@ func (in *TiDBTLSClient) DeepCopy() *TiDBTLSClient {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiFlashCommonConfigWraper) DeepCopyInto(out *TiFlashCommonConfigWraper) {
+	*out = *in
+	if in.GenericConfig != nil {
+		in, out := &in.GenericConfig, &out.GenericConfig
+		*out = (*in).DeepCopy()
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiFlashCommonConfigWraper.
+func (in *TiFlashCommonConfigWraper) DeepCopy() *TiFlashCommonConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(TiFlashCommonConfigWraper)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *TiFlashConfig) DeepCopyInto(out *TiFlashConfig) {
 	*out = *in
 	if in.CommonConfig != nil {
@@ -4182,6 +4535,52 @@ func (in *TiFlashConfig) DeepCopy() *TiFlashConfig {
 		return nil
 	}
 	out := new(TiFlashConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiFlashConfigWraper) DeepCopyInto(out *TiFlashConfigWraper) {
+	*out = *in
+	if in.Common != nil {
+		in, out := &in.Common, &out.Common
+		*out = new(TiFlashCommonConfigWraper)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Proxy != nil {
+		in, out := &in.Proxy, &out.Proxy
+		*out = new(TiFlashProxyConfigWraper)
+		(*in).DeepCopyInto(*out)
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiFlashConfigWraper.
+func (in *TiFlashConfigWraper) DeepCopy() *TiFlashConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(TiFlashConfigWraper)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiFlashProxyConfigWraper) DeepCopyInto(out *TiFlashProxyConfigWraper) {
+	*out = *in
+	if in.GenericConfig != nil {
+		in, out := &in.GenericConfig, &out.GenericConfig
+		*out = (*in).DeepCopy()
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiFlashProxyConfigWraper.
+func (in *TiFlashProxyConfigWraper) DeepCopy() *TiFlashProxyConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(TiFlashProxyConfigWraper)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -4210,7 +4609,7 @@ func (in *TiFlashSpec) DeepCopyInto(out *TiFlashSpec) {
 	}
 	if in.Config != nil {
 		in, out := &in.Config, &out.Config
-		*out = new(TiFlashConfig)
+		*out = new(TiFlashConfigWraper)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.LogTailer != nil {
@@ -4269,6 +4668,27 @@ func (in *TiFlashStatus) DeepCopy() *TiFlashStatus {
 		return nil
 	}
 	out := new(TiFlashStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiKVBackupConfig) DeepCopyInto(out *TiKVBackupConfig) {
+	*out = *in
+	if in.NumThreads != nil {
+		in, out := &in.NumThreads, &out.NumThreads
+		*out = new(int64)
+		**out = **in
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiKVBackupConfig.
+func (in *TiKVBackupConfig) DeepCopy() *TiKVBackupConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(TiKVBackupConfig)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -4599,6 +5019,11 @@ func (in *TiKVConfig) DeepCopyInto(out *TiKVConfig) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.LogFormat != nil {
+		in, out := &in.LogFormat, &out.LogFormat
+		*out = new(string)
+		**out = **in
+	}
 	if in.SlowLogFile != nil {
 		in, out := &in.SlowLogFile, &out.SlowLogFile
 		*out = new(string)
@@ -4689,6 +5114,11 @@ func (in *TiKVConfig) DeepCopyInto(out *TiKVConfig) {
 		*out = new(TiKVPessimisticTxn)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Backup != nil {
+		in, out := &in.Backup, &out.Backup
+		*out = new(TiKVBackupConfig)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 
@@ -4698,6 +5128,26 @@ func (in *TiKVConfig) DeepCopy() *TiKVConfig {
 		return nil
 	}
 	out := new(TiKVConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TiKVConfigWraper) DeepCopyInto(out *TiKVConfigWraper) {
+	*out = *in
+	if in.GenericConfig != nil {
+		in, out := &in.GenericConfig, &out.GenericConfig
+		*out = (*in).DeepCopy()
+	}
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TiKVConfigWraper.
+func (in *TiKVConfigWraper) DeepCopy() *TiKVConfigWraper {
+	if in == nil {
+		return nil
+	}
+	out := new(TiKVConfigWraper)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -4784,6 +5234,11 @@ func (in *TiKVCoprocessorReadPoolConfig) DeepCopyInto(out *TiKVCoprocessorReadPo
 	if in.StackSize != nil {
 		in, out := &in.StackSize, &out.StackSize
 		*out = new(string)
+		**out = **in
+	}
+	if in.UseUnifiedPool != nil {
+		in, out := &in.UseUnifiedPool, &out.UseUnifiedPool
+		*out = new(bool)
 		**out = **in
 	}
 	return
@@ -5024,6 +5479,16 @@ func (in *TiKVGCConfig) DeepCopyInto(out *TiKVGCConfig) {
 	if in.MaxWriteBytesPerSec != nil {
 		in, out := &in.MaxWriteBytesPerSec, &out.MaxWriteBytesPerSec
 		*out = new(string)
+		**out = **in
+	}
+	if in.EnableCompactionFilter != nil {
+		in, out := &in.EnableCompactionFilter, &out.EnableCompactionFilter
+		*out = new(bool)
+		**out = **in
+	}
+	if in.EnableCompactionFilterSkipVersionCheck != nil {
+		in, out := &in.EnableCompactionFilterSkipVersionCheck, &out.EnableCompactionFilterSkipVersionCheck
+		*out = new(bool)
 		**out = **in
 	}
 	return
@@ -5364,6 +5829,16 @@ func (in *TiKVRaftstoreConfig) DeepCopyInto(out *TiKVRaftstoreConfig) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.RaftMaxSizePerMsg != nil {
+		in, out := &in.RaftMaxSizePerMsg, &out.RaftMaxSizePerMsg
+		*out = new(string)
+		**out = **in
+	}
+	if in.RaftMaxInflightMsgs != nil {
+		in, out := &in.RaftMaxInflightMsgs, &out.RaftMaxInflightMsgs
+		*out = new(int64)
+		**out = **in
+	}
 	if in.RaftLogGCTickInterval != nil {
 		in, out := &in.RaftLogGCTickInterval, &out.RaftLogGCTickInterval
 		*out = new(string)
@@ -5564,8 +6039,33 @@ func (in *TiKVRaftstoreConfig) DeepCopyInto(out *TiKVRaftstoreConfig) {
 		*out = new(int64)
 		**out = **in
 	}
+	if in.StoreRescheduleDuration != nil {
+		in, out := &in.StoreRescheduleDuration, &out.StoreRescheduleDuration
+		*out = new(string)
+		**out = **in
+	}
+	if in.ApplyYieldDuration != nil {
+		in, out := &in.ApplyYieldDuration, &out.ApplyYieldDuration
+		*out = new(string)
+		**out = **in
+	}
 	if in.HibernateRegions != nil {
 		in, out := &in.HibernateRegions, &out.HibernateRegions
+		*out = new(bool)
+		**out = **in
+	}
+	if in.ApplyEarly != nil {
+		in, out := &in.ApplyEarly, &out.ApplyEarly
+		*out = new(bool)
+		**out = **in
+	}
+	if in.PerfLevel != nil {
+		in, out := &in.PerfLevel, &out.PerfLevel
+		*out = new(int64)
+		**out = **in
+	}
+	if in.DevAssert != nil {
+		in, out := &in.DevAssert, &out.DevAssert
 		*out = new(bool)
 		**out = **in
 	}
@@ -5754,6 +6254,11 @@ func (in *TiKVServerConfig) DeepCopyInto(out *TiKVServerConfig) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.MaxGrpcSendMsgLen != nil {
+		in, out := &in.MaxGrpcSendMsgLen, &out.MaxGrpcSendMsgLen
+		*out = new(uint)
+		**out = **in
+	}
 	if in.GrpcCompressionType != nil {
 		in, out := &in.GrpcCompressionType, &out.GrpcCompressionType
 		*out = new(string)
@@ -5916,8 +6421,25 @@ func (in *TiKVSpec) DeepCopyInto(out *TiKVSpec) {
 	}
 	if in.Config != nil {
 		in, out := &in.Config, &out.Config
-		*out = new(TiKVConfig)
+		*out = new(TiKVConfigWraper)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.MountClusterClientSecret != nil {
+		in, out := &in.MountClusterClientSecret, &out.MountClusterClientSecret
+		*out = new(bool)
+		**out = **in
+	}
+	if in.EvictLeaderTimeout != nil {
+		in, out := &in.EvictLeaderTimeout, &out.EvictLeaderTimeout
+		*out = new(string)
+		**out = **in
+	}
+	if in.StorageVolumes != nil {
+		in, out := &in.StorageVolumes, &out.StorageVolumes
+		*out = make([]StorageVolume, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	return
 }
@@ -6061,6 +6583,11 @@ func (in *TiKVStorageReadPoolConfig) DeepCopyInto(out *TiKVStorageReadPoolConfig
 	if in.StackSize != nil {
 		in, out := &in.StackSize, &out.StackSize
 		*out = new(string)
+		**out = **in
+	}
+	if in.UseUnifiedPool != nil {
+		in, out := &in.UseUnifiedPool, &out.UseUnifiedPool
+		*out = new(bool)
 		**out = **in
 	}
 	return
@@ -6366,6 +6893,22 @@ func (in *TidbClusterAutoScalerList) DeepCopyObject() runtime.Object {
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *TidbClusterAutoScalerRef) DeepCopyInto(out *TidbClusterAutoScalerRef) {
+	*out = *in
+	return
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new TidbClusterAutoScalerRef.
+func (in *TidbClusterAutoScalerRef) DeepCopy() *TidbClusterAutoScalerRef {
+	if in == nil {
+		return nil
+	}
+	out := new(TidbClusterAutoScalerRef)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
 func (in *TidbClusterAutoScalerSpec) DeepCopyInto(out *TidbClusterAutoScalerSpec) {
 	*out = *in
 	out.Cluster = in.Cluster
@@ -6499,9 +7042,21 @@ func (in *TidbClusterRef) DeepCopy() *TidbClusterRef {
 func (in *TidbClusterSpec) DeepCopyInto(out *TidbClusterSpec) {
 	*out = *in
 	in.Discovery.DeepCopyInto(&out.Discovery)
-	in.PD.DeepCopyInto(&out.PD)
-	in.TiDB.DeepCopyInto(&out.TiDB)
-	in.TiKV.DeepCopyInto(&out.TiKV)
+	if in.PD != nil {
+		in, out := &in.PD, &out.PD
+		*out = new(PDSpec)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.TiDB != nil {
+		in, out := &in.TiDB, &out.TiDB
+		*out = new(TiDBSpec)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.TiKV != nil {
+		in, out := &in.TiKV, &out.TiKV
+		*out = new(TiKVSpec)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.TiFlash != nil {
 		in, out := &in.TiFlash, &out.TiFlash
 		*out = new(TiFlashSpec)
@@ -6521,6 +7076,16 @@ func (in *TidbClusterSpec) DeepCopyInto(out *TidbClusterSpec) {
 		in, out := &in.Helper, &out.Helper
 		*out = new(HelperSpec)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.PVReclaimPolicy != nil {
+		in, out := &in.PVReclaimPolicy, &out.PVReclaimPolicy
+		*out = new(v1.PersistentVolumeReclaimPolicy)
+		**out = **in
+	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
 	}
 	if in.EnablePVReclaim != nil {
 		in, out := &in.EnablePVReclaim, &out.EnablePVReclaim
@@ -6573,6 +7138,21 @@ func (in *TidbClusterSpec) DeepCopyInto(out *TidbClusterSpec) {
 		*out = make([]Service, len(*in))
 		copy(*out, *in)
 	}
+	if in.EnableDynamicConfiguration != nil {
+		in, out := &in.EnableDynamicConfiguration, &out.EnableDynamicConfiguration
+		*out = new(bool)
+		**out = **in
+	}
+	if in.Cluster != nil {
+		in, out := &in.Cluster, &out.Cluster
+		*out = new(TidbClusterRef)
+		**out = **in
+	}
+	if in.PDAddresses != nil {
+		in, out := &in.PDAddresses, &out.PDAddresses
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -6598,6 +7178,11 @@ func (in *TidbClusterStatus) DeepCopyInto(out *TidbClusterStatus) {
 	if in.Monitor != nil {
 		in, out := &in.Monitor, &out.Monitor
 		*out = new(TidbMonitorRef)
+		**out = **in
+	}
+	if in.AutoScaler != nil {
+		in, out := &in.AutoScaler, &out.AutoScaler
+		*out = new(TidbClusterAutoScalerRef)
 		**out = **in
 	}
 	if in.Conditions != nil {
@@ -6689,6 +7274,11 @@ func (in *TidbInitializerSpec) DeepCopyInto(out *TidbInitializerSpec) {
 		in, out := &in.ImagePullPolicy, &out.ImagePullPolicy
 		*out = new(v1.PullPolicy)
 		**out = **in
+	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
 	}
 	if in.PermitHost != nil {
 		in, out := &in.PermitHost, &out.PermitHost
@@ -6843,6 +7433,16 @@ func (in *TidbMonitorSpec) DeepCopyInto(out *TidbMonitorSpec) {
 	}
 	in.Reloader.DeepCopyInto(&out.Reloader)
 	in.Initializer.DeepCopyInto(&out.Initializer)
+	if in.PVReclaimPolicy != nil {
+		in, out := &in.PVReclaimPolicy, &out.PVReclaimPolicy
+		*out = new(v1.PersistentVolumeReclaimPolicy)
+		**out = **in
+	}
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
+	}
 	if in.StorageClassName != nil {
 		in, out := &in.StorageClassName, &out.StorageClassName
 		*out = new(string)
@@ -6879,6 +7479,18 @@ func (in *TidbMonitorSpec) DeepCopyInto(out *TidbMonitorSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.AlertManagerRulesVersion != nil {
+		in, out := &in.AlertManagerRulesVersion, &out.AlertManagerRulesVersion
+		*out = new(string)
+		**out = **in
+	}
+	if in.AdditionalContainers != nil {
+		in, out := &in.AdditionalContainers, &out.AdditionalContainers
+		*out = make([]v1.Container, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	return
 }
 
@@ -6912,11 +7524,6 @@ func (in *TidbMonitorStatus) DeepCopy() *TidbMonitorStatus {
 func (in *TikvAutoScalerSpec) DeepCopyInto(out *TikvAutoScalerSpec) {
 	*out = *in
 	in.BasicAutoScalerSpec.DeepCopyInto(&out.BasicAutoScalerSpec)
-	if in.ReadyToScaleThresholdSeconds != nil {
-		in, out := &in.ReadyToScaleThresholdSeconds, &out.ReadyToScaleThresholdSeconds
-		*out = new(int32)
-		**out = **in
-	}
 	return
 }
 

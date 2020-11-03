@@ -19,12 +19,16 @@ import (
 	"time"
 
 	etcdclientv3 "github.com/coreos/etcd/clientv3"
+	etcdclientv3util "github.com/coreos/etcd/clientv3/clientv3util"
 )
 
-type PDEtcdApi interface {
+type PDEtcdClient interface {
+	// PutKey will put key to the target pd etcd cluster
 	PutKey(key, value string) error
-
+	// DeleteKey will delete key from the target pd etcd cluster
 	DeleteKey(key string) error
+	// Close will close the etcd connection
+	Close() error
 }
 
 type pdEtcdClient struct {
@@ -32,7 +36,7 @@ type pdEtcdClient struct {
 	etcdClient *etcdclientv3.Client
 }
 
-func NewPdEtcdClient(url string, timeout time.Duration, tlsConfig *tls.Config) (PDEtcdApi, error) {
+func NewPdEtcdClient(url string, timeout time.Duration, tlsConfig *tls.Config) (PDEtcdClient, error) {
 	etcdClient, err := etcdclientv3.New(etcdclientv3.Config{
 		Endpoints:   []string{url},
 		DialTimeout: timeout,
@@ -47,16 +51,29 @@ func NewPdEtcdClient(url string, timeout time.Duration, tlsConfig *tls.Config) (
 	}, nil
 }
 
-func (pec *pdEtcdClient) PutKey(key, value string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), pec.timeout)
+func (c *pdEtcdClient) Close() error {
+	return c.etcdClient.Close()
+}
+
+func (c *pdEtcdClient) PutKey(key, value string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	_, err := pec.etcdClient.Put(ctx, key, value)
+	_, err := c.etcdClient.Put(ctx, key, value)
 	return err
 }
 
-func (pec *pdEtcdClient) DeleteKey(key string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), pec.timeout)
+func (c *pdEtcdClient) DeleteKey(key string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	_, err := pec.etcdClient.Delete(ctx, key)
-	return err
+	kvc := etcdclientv3.NewKV(c.etcdClient)
+
+	// perform a delete only if key already exists
+	_, err := kvc.Txn(ctx).
+		If(etcdclientv3util.KeyExists(key)).
+		Then(etcdclientv3.OpDelete(key)).
+		Commit()
+	if err != nil {
+		return err
+	}
+	return nil
 }

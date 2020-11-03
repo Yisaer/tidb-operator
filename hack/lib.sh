@@ -29,7 +29,7 @@ KUBECTL_BIN=$OUTPUT_BIN/kubectl
 HELM_BIN=$OUTPUT_BIN/helm
 DOCS_BIN=$OUTPUT_BIN/gen-crd-api-reference-docs
 #
-# Don't ugprade to 2.15.x/2.16.x until this issue
+# Don't upgrade to 2.15.x/2.16.x until this issue
 # (https://github.com/helm/helm/issues/6361) has been fixed.
 #
 HELM_VERSION=${HELM_VERSION:-2.9.1}
@@ -183,7 +183,7 @@ function hack::__ensure_kubetest2() {
     local tmpfile=$(mktemp)
     trap "test -f $tmpfile && rm $tmpfile" RETURN
     echo "info: downloading $n $KUBETEST2_VERSION"
-    curl --retry 10 -L -o - https://github.com/cofyc/kubetest2/releases/download/$KUBETEST2_VERSION/$n-$OS-$ARCH.gz | gunzip > $tmpfile
+    curl --retry 10 -L -o - https://github.com/cofyc/kubetest2-release/releases/download/$KUBETEST2_VERSION/$n-$OS-$ARCH.gz | gunzip > $tmpfile
     mv $tmpfile $OUTPUT_BIN/$n
     chmod +x $OUTPUT_BIN/$n
 }

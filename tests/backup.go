@@ -68,6 +68,17 @@ func (oa *operatorActions) BackupAndRestoreToMultipleClusters(source *TidbCluste
 		return err
 	}
 
+	err = oa.BeginInsertDataTo(source)
+	if err != nil {
+		return err
+	}
+	klog.Infof("waiting 30 seconds to insert into more records")
+	time.Sleep(30 * time.Second)
+
+	// we should stop insert data before backup
+	// Restoring via reparo is slow, so we stop inserting data as early as possible to reduce the size of incremental data
+	oa.StopInsertDataTo(source)
+
 	err = oa.DeployAdHocBackup(source)
 	if err != nil {
 		klog.Errorf("cluster:[%s] deploy happen error: %v", source.ClusterName, err)
@@ -79,9 +90,6 @@ func (oa *operatorActions) BackupAndRestoreToMultipleClusters(source *TidbCluste
 		klog.Errorf("cluster:[%s] deploy happen error: %v", source.ClusterName, err)
 		return err
 	}
-
-	// Restoring via reparo is slow, so we stop inserting data as early as possible to reduce the size of incremental data
-	oa.StopInsertDataTo(source)
 
 	prepareIncremental := func(source *TidbClusterConfig, target BackupTarget) error {
 		err = oa.CheckTidbClusterStatus(target.TargetCluster)
@@ -187,7 +195,16 @@ func (oa *operatorActions) BackupAndRestoreToMultipleClusters(source *TidbCluste
 		return err
 	}
 
-	oa.BeginInsertDataToOrDie(source)
+	err = oa.BeginInsertDataTo(source)
+	if err != nil {
+		return err
+	}
+	klog.Infof("waiting 30 seconds to insert into more records")
+	time.Sleep(30 * time.Second)
+
+	klog.Infof("cluster[%s] stop insert data", source.ClusterName)
+	oa.StopInsertDataTo(source)
+
 	err = oa.DeployScheduledBackup(source)
 	if err != nil {
 		klog.Errorf("cluster:[%s] scheduler happen error: %v", source.ClusterName, err)
@@ -308,6 +325,14 @@ func (oa *operatorActions) CheckDrainer(info *DrainerConfig, source *TidbCluster
 		if sts.Status.ReadyReplicas != DrainerReplicas {
 			klog.Infof("StatefulSet: %s/%s .state.ReadyReplicas(%d) != %d",
 				ns, sts.Name, sts.Status.ReadyReplicas, DrainerReplicas)
+			return false, nil
+		}
+		for i := 0; i < int(*sts.Spec.Replicas); i++ {
+			podName := fmt.Sprintf("%s-%d", stsName, i)
+			if !oa.drainerHealth(source.ClusterName, source.Namespace, podName, info.TLSCluster) {
+				klog.Infof("%s is not health yet", podName)
+				return false, nil
+			}
 		}
 		return true, nil
 	}

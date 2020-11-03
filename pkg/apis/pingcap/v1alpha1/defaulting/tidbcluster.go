@@ -34,9 +34,15 @@ var (
 
 func SetTidbClusterDefault(tc *v1alpha1.TidbCluster) {
 	setTidbClusterSpecDefault(tc)
-	setPdSpecDefault(tc)
-	setTikvSpecDefault(tc)
-	setTidbSpecDefault(tc)
+	if tc.Spec.PD != nil {
+		setPdSpecDefault(tc)
+	}
+	if tc.Spec.TiKV != nil {
+		setTikvSpecDefault(tc)
+	}
+	if tc.Spec.TiDB != nil {
+		setTidbSpecDefault(tc)
+	}
 	if tc.Spec.Pump != nil {
 		setPumpSpecDefault(tc)
 	}
@@ -60,6 +66,10 @@ func setTidbClusterSpecDefault(tc *v1alpha1.TidbCluster) {
 		d := false
 		tc.Spec.EnablePVReclaim = &d
 	}
+	retainPVP := corev1.PersistentVolumeReclaimRetain
+	if tc.Spec.PVReclaimPolicy == nil {
+		tc.Spec.PVReclaimPolicy = &retainPVP
+	}
 }
 
 func setTidbSpecDefault(tc *v1alpha1.TidbCluster) {
@@ -72,25 +82,14 @@ func setTidbSpecDefault(tc *v1alpha1.TidbCluster) {
 		tc.Spec.TiDB.MaxFailoverCount = pointer.Int32Ptr(3)
 	}
 
+	// Start set config if need.
+	if tc.Spec.TiDB.Config == nil {
+		return
+	}
 	// we only set default log
-	if tc.Spec.TiDB.Config != nil {
-		if tc.Spec.TiDB.Config.Log == nil {
-			tc.Spec.TiDB.Config.Log = &v1alpha1.Log{
-				File: &v1alpha1.FileLogConfig{
-					MaxBackups: &tidbLogMaxBackups,
-				},
-			}
-		} else {
-			if tc.Spec.TiDB.Config.Log.File == nil {
-				tc.Spec.TiDB.Config.Log.File = &v1alpha1.FileLogConfig{
-					MaxBackups: &tidbLogMaxBackups,
-				}
-			} else {
-				if tc.Spec.TiDB.Config.Log.File.MaxBackups == nil {
-					tc.Spec.TiDB.Config.Log.File.MaxBackups = &tidbLogMaxBackups
-				}
-			}
-		}
+	backupKey := "log.file.max-backups"
+	if v := tc.Spec.TiDB.Config.Get(backupKey); v == nil {
+		tc.Spec.TiDB.Config.Set(backupKey, tidbLogMaxBackups)
 	}
 }
 

@@ -409,7 +409,7 @@ var _ = ginkgo.Describe("[tidb-operator][Stability]", func() {
 			}
 
 			ginkgo.By("Mark stores of failed tikv pods as tombstone")
-			pdClient, cancel, err := proxiedpdclient.NewProxiedPDClient(c, fw, ns, clusterName, false, nil)
+			pdClient, cancel, err := proxiedpdclient.NewProxiedPDClient(c, fw, ns, clusterName, false)
 			framework.ExpectNoError(err)
 			defer func() {
 				if cancel != nil {
@@ -509,9 +509,7 @@ var _ = ginkgo.Describe("[tidb-operator][Stability]", func() {
 			ginkgo.By("Update tidb configuration")
 			updateStrategy := v1alpha1.ConfigUpdateStrategyRollingUpdate
 			err = controller.GuaranteedUpdate(genericCli, tc, func() error {
-				tc.Spec.TiDB.Config.TokenLimit = func(i uint) *uint {
-					return &i
-				}(2000)
+				tc.Spec.TiDB.Config.Set("token-limit", 2000)
 				tc.Spec.TiDB.ConfigUpdateStrategy = &updateStrategy
 				return nil
 			})
@@ -857,6 +855,126 @@ var _ = ginkgo.Describe("[tidb-operator][Stability]", func() {
 			framework.ExpectNoError(err)
 		})
 
+		// https://github.com/pingcap/tidb-operator/issues/2739
+		ginkgo.It("[Feature: AutoFailover] Failover can work if a store fails to upgrade", func() {
+			clusterName := "scale"
+			tc := fixture.GetTidbCluster(ns, clusterName, utilimage.TiDBV4Version)
+			tc.Spec.PD.Replicas = 1
+			// By default, PD set the state of disconnected store to Down
+			// after 30 minutes. Use a short time in testing.
+			tc.Spec.PD.Config.Set("schedule.max-store-down-time", "1m")
+			tc.Spec.TiKV.Replicas = 3
+			tc.Spec.TiDB.Replicas = 1
+			err := genericCli.Create(context.TODO(), tc)
+			framework.ExpectNoError(err)
+			err = oa.WaitForTidbClusterReady(tc, 30*time.Minute, 15*time.Second)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Fail a TiKV store")
+			podName := controller.TiKVMemberName(clusterName) + "-1"
+			f.ExecCommandInContainer(podName, "tikv", "sh", "-c", "rm -rf /var/lib/tikv/*")
+
+			ginkgo.By("Waiting for the store to be in Down state")
+			err = utiltidbcluster.WaitForTidbClusterCondition(cli, tc.Namespace, tc.Name, time.Minute*5, func(tc *v1alpha1.TidbCluster) (bool, error) {
+				for _, store := range tc.Status.TiKV.Stores {
+					if store.PodName == podName && store.State == v1alpha1.TiKVStateDown {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Upgrade TiKV configuration")
+			updateStrategy := v1alpha1.ConfigUpdateStrategyRollingUpdate
+			err = controller.GuaranteedUpdate(genericCli, tc, func() error {
+				tc.Spec.TiKV.Config.Set("log-level", "info")
+				tc.Spec.TiKV.ConfigUpdateStrategy = &updateStrategy
+				return nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the store to be put into failsure stores")
+			err = utiltidbcluster.WaitForTidbClusterCondition(cli, tc.Namespace, tc.Name, time.Minute*5, func(tc *v1alpha1.TidbCluster) (bool, error) {
+				for _, failureStore := range tc.Status.TiKV.FailureStores {
+					if failureStore.PodName == podName {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the new pod to be created")
+			newPodName := controller.TiKVMemberName(clusterName) + "-3"
+			err = wait.PollImmediate(time.Second*10, 1*time.Minute, func() (bool, error) {
+				_, err := c.CoreV1().Pods(ns).Get(newPodName, metav1.GetOptions{})
+				if err != nil && !apierrors.IsNotFound(err) {
+					return false, nil
+				}
+				return !apierrors.IsNotFound(err), nil
+			})
+			framework.ExpectNoError(err)
+		})
+
+		// https://github.com/pingcap/tidb-operator/issues/2739
+		ginkgo.It("[Feature: AutoFailover] Failover can work if a pd fails to upgrade", func() {
+			clusterName := "scale"
+			tc := fixture.GetTidbCluster(ns, clusterName, utilimage.TiDBV4Version)
+			tc.Spec.PD.Replicas = 3
+			tc.Spec.TiKV.Replicas = 1
+			tc.Spec.TiDB.Replicas = 1
+			err := genericCli.Create(context.TODO(), tc)
+			framework.ExpectNoError(err)
+			err = oa.WaitForTidbClusterReady(tc, 30*time.Minute, 15*time.Second)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Fail a PD")
+			podName := controller.PDMemberName(clusterName) + "-1"
+			f.ExecCommandInContainer(podName, "pd", "sh", "-c", "rm -rf /var/lib/pd/*")
+
+			ginkgo.By("Waiting for the pd to be in unhealthy state")
+			err = utiltidbcluster.WaitForTidbClusterCondition(cli, tc.Namespace, tc.Name, time.Minute*5, func(tc *v1alpha1.TidbCluster) (bool, error) {
+				for _, member := range tc.Status.PD.Members {
+					if member.Name == podName && !member.Health {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Upgrade PD configuration")
+			updateStrategy := v1alpha1.ConfigUpdateStrategyRollingUpdate
+			err = controller.GuaranteedUpdate(genericCli, tc, func() error {
+				tc.Spec.PD.Config.Set("log.level", "info")
+				tc.Spec.PD.ConfigUpdateStrategy = &updateStrategy
+				return nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the pd to be put into failsure members")
+			err = utiltidbcluster.WaitForTidbClusterCondition(cli, tc.Namespace, tc.Name, time.Minute*5, func(tc *v1alpha1.TidbCluster) (bool, error) {
+				for _, failureMember := range tc.Status.PD.FailureMembers {
+					if failureMember.PodName == podName {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the new pod to be created")
+			newPodName := controller.PDMemberName(clusterName) + "-3"
+			err = wait.PollImmediate(time.Second*10, 1*time.Minute, func() (bool, error) {
+				_, err := c.CoreV1().Pods(ns).Get(newPodName, metav1.GetOptions{})
+				if err != nil && !apierrors.IsNotFound(err) {
+					return false, nil
+				}
+				return !apierrors.IsNotFound(err), nil
+			})
+			framework.ExpectNoError(err)
+		})
 	})
 
 	ginkgo.Context("[Feature: AdvancedStatefulSet][Feature: AutoFailover] operator with advanced statefulset and short auto-failover periods", func() {
@@ -905,9 +1023,7 @@ var _ = ginkgo.Describe("[tidb-operator][Stability]", func() {
 			tc := fixture.GetTidbCluster(ns, clusterName, utilimage.TiDBV3Version)
 			tc.Spec.SchedulerName = ""
 			tc.Spec.PD.Replicas = 1
-			tc.Spec.PD.Config.Schedule = &v1alpha1.PDScheduleConfig{
-				MaxStoreDownTime: pointer.StringPtr("1m"),
-			}
+			tc.Spec.PD.Config.Set("schedule.max-store-down-time", "1m")
 			tc.Spec.TiDB.Replicas = 1
 			tc.Spec.TiKV.Replicas = 3
 			err := genericCli.Create(context.TODO(), tc)
@@ -923,13 +1039,12 @@ var _ = ginkgo.Describe("[tidb-operator][Stability]", func() {
 
 			ginkgo.By("Waiting for the store to be put into failsure stores")
 			err = utiltidbcluster.WaitForTidbClusterCondition(cli, tc.Namespace, tc.Name, time.Minute*5, func(tc *v1alpha1.TidbCluster) (bool, error) {
-				exist := false
 				for _, failureStore := range tc.Status.TiKV.FailureStores {
 					if failureStore.PodName == podName {
-						exist = true
+						return true, nil
 					}
 				}
-				return exist, nil
+				return false, nil
 			})
 			framework.ExpectNoError(err)
 

@@ -14,12 +14,17 @@
 package util
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Masterminds/semver"
+	"github.com/gogo/protobuf/proto"
+	kvbackup "github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/tidb-operator/cmd/backup-manager/app/constants"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/backup/util"
@@ -37,17 +42,13 @@ var (
 	// DefaultVersion is the default tikv and br version
 	DefaultVersion = "4.0"
 	defaultOptions = []string{
-		"--long-query-guard=3600",
-		"--tidb-force-priority=LOW_PRIORITY",
-		"--verbose=3",
-		"--compress-protocol",
+		// "--tidb-force-priority=LOW_PRIORITY",
 		"--threads=16",
 		"--rows=10000",
-		"--skip-tz-utc",
 	}
-	defaultTableRegexOptions = []string{
-		"--regex",
-		constants.DefaultTableRegex,
+	defaultTableFilterOptions = []string{
+		"--filter", "*.*",
+		"--filter", constants.DefaultTableFilter,
 	}
 )
 
@@ -84,15 +85,46 @@ func EnsureDirectoryExist(dirName string) error {
 	return nil
 }
 
+func GetRemotePath(backup *v1alpha1.Backup) (string, error) {
+	var path, bucket, prefix string
+	st := util.GetStorageType(backup.Spec.StorageProvider)
+	switch st {
+	case v1alpha1.BackupStorageTypeS3:
+		prefix = backup.Spec.StorageProvider.S3.Prefix
+		bucket = backup.Spec.StorageProvider.S3.Bucket
+		prefix = strings.Trim(prefix, "/")
+		prefix += "/"
+		if prefix == "/" {
+			path = fmt.Sprintf("s3://%s%s", bucket, prefix)
+		} else {
+			path = fmt.Sprintf("s3://%s/%s", bucket, prefix)
+		}
+		return path, nil
+	case v1alpha1.BackupStorageTypeGcs:
+		prefix = backup.Spec.StorageProvider.Gcs.Prefix
+		bucket = backup.Spec.StorageProvider.Gcs.Bucket
+		prefix = strings.Trim(prefix, "/")
+		prefix += "/"
+		if prefix == "/" {
+			path = fmt.Sprintf("gcs://%s%s", bucket, prefix)
+		} else {
+			path = fmt.Sprintf("gcs://%s/%s", bucket, prefix)
+		}
+		return path, nil
+	default:
+		return "", fmt.Errorf("storage %s not support yet", st)
+	}
+}
+
 // OpenDB opens db
 func OpenDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open dsn %s failed, err: %v", dsn, err)
+		return nil, fmt.Errorf("open datasource failed, err: %v", err)
 	}
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("cannot connect to mysql: %s, err: %v", dsn, err)
+		return nil, fmt.Errorf("cannot connect to mysql, err: %v", err)
 	}
 	return db, nil
 }
@@ -127,70 +159,109 @@ func GetOptionValueFromEnv(option, envPrefix string) string {
 }
 
 // ConstructBRGlobalOptionsForBackup constructs BR global options for backup and also return the remote path.
-func ConstructBRGlobalOptionsForBackup(backup *v1alpha1.Backup) ([]string, string, error) {
+func ConstructBRGlobalOptionsForBackup(backup *v1alpha1.Backup) ([]string, error) {
 	var args []string
-	config := backup.Spec.BR
-	if config == nil {
-		return nil, "", fmt.Errorf("no config for br in backup %s/%s", backup.Namespace, backup.Name)
+	config := backup.Spec
+	if config.BR == nil {
+		return nil, fmt.Errorf("no config for br in backup %s/%s", backup.Namespace, backup.Name)
 	}
-	args = append(args, constructBRGlobalOptions(config)...)
-	storageArgs, remotePath, err := getRemoteStorage(backup.Spec.StorageProvider)
+	args = append(args, constructBRGlobalOptions(config.BR)...)
+	storageArgs, err := getRemoteStorage(backup.Spec.StorageProvider)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	args = append(args, storageArgs...)
-	if (backup.Spec.Type == v1alpha1.BackupTypeDB || backup.Spec.Type == v1alpha1.BackupTypeTable) && config.DB != "" {
-		args = append(args, fmt.Sprintf("--db=%s", config.DB))
+
+	if config.TableFilter != nil && len(config.TableFilter) > 0 {
+		for _, tableFilter := range config.TableFilter {
+			args = append(args, "--filter", tableFilter)
+		}
+		return args, nil
 	}
-	if backup.Spec.Type == v1alpha1.BackupTypeTable && config.Table != "" {
-		args = append(args, fmt.Sprintf("--table=%s", config.Table))
+
+	switch backup.Spec.Type {
+	case v1alpha1.BackupTypeTable:
+		if config.BR.Table != "" {
+			args = append(args, fmt.Sprintf("--table=%s", config.BR.Table))
+		}
+		if config.BR.DB != "" {
+			args = append(args, fmt.Sprintf("--db=%s", config.BR.DB))
+		}
+	case v1alpha1.BackupTypeDB:
+		if config.BR.DB != "" {
+			args = append(args, fmt.Sprintf("--db=%s", config.BR.DB))
+		}
 	}
-	return args, remotePath, nil
+
+	return args, nil
 }
 
-// ConstructMydumperOptionsForBackup constructs mydumper options for backup
-func ConstructMydumperOptionsForBackup(backup *v1alpha1.Backup) []string {
+// ConstructDumplingOptionsForBackup constructs dumpling options for backup
+func ConstructDumplingOptionsForBackup(backup *v1alpha1.Backup) []string {
 	var args []string
-	config := backup.Spec.Mydumper
-	if config == nil {
+	config := backup.Spec
+
+	if config.TableFilter != nil && len(config.TableFilter) > 0 {
+		for _, tableFilter := range config.TableFilter {
+			args = append(args, "--filter", tableFilter)
+		}
+	} else if config.Dumpling != nil && config.Dumpling.TableFilter != nil && len(config.Dumpling.TableFilter) > 0 {
+		for _, tableFilter := range config.Dumpling.TableFilter {
+			args = append(args, "--filter", tableFilter)
+		}
+	} else {
+		args = append(args, defaultTableFilterOptions...)
+	}
+
+	if config.Dumpling == nil {
 		args = append(args, defaultOptions...)
-		args = append(args, defaultTableRegexOptions...)
 		return args
 	}
 
-	if len(config.Options) != 0 {
-		args = append(args, config.Options...)
+	if len(config.Dumpling.Options) != 0 {
+		args = append(args, config.Dumpling.Options...)
 	} else {
 		args = append(args, defaultOptions...)
 	}
 
-	if config.TableRegex != nil {
-		args = append(args, "--regex", *config.TableRegex)
-	} else {
-		args = append(args, defaultTableRegexOptions...)
-	}
 	return args
 }
 
 // ConstructBRGlobalOptionsForRestore constructs BR global options for restore.
 func ConstructBRGlobalOptionsForRestore(restore *v1alpha1.Restore) ([]string, error) {
 	var args []string
-	config := restore.Spec.BR
-	if config == nil {
+	config := restore.Spec
+	if config.BR == nil {
 		return nil, fmt.Errorf("no config for br in restore %s/%s", restore.Namespace, restore.Name)
 	}
-	args = append(args, constructBRGlobalOptions(config)...)
-	storageArgs, _, err := getRemoteStorage(restore.Spec.StorageProvider)
+	args = append(args, constructBRGlobalOptions(config.BR)...)
+	storageArgs, err := getRemoteStorage(restore.Spec.StorageProvider)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, storageArgs...)
-	if (restore.Spec.Type == v1alpha1.BackupTypeDB || restore.Spec.Type == v1alpha1.BackupTypeTable) && config.DB != "" {
-		args = append(args, fmt.Sprintf("--db=%s", config.DB))
+
+	if config.TableFilter != nil && len(config.TableFilter) > 0 {
+		for _, tableFilter := range config.TableFilter {
+			args = append(args, "--filter", tableFilter)
+		}
+		return args, nil
 	}
-	if restore.Spec.Type == v1alpha1.BackupTypeTable && config.Table != "" {
-		args = append(args, fmt.Sprintf("--table=%s", config.Table))
+
+	switch restore.Spec.Type {
+	case v1alpha1.BackupTypeTable:
+		if config.BR.Table != "" {
+			args = append(args, fmt.Sprintf("--table=%s", config.BR.Table))
+		}
+		if config.BR.DB != "" {
+			args = append(args, fmt.Sprintf("--db=%s", config.BR.DB))
+		}
+	case v1alpha1.BackupTypeDB:
+		if config.BR.DB != "" {
+			args = append(args, fmt.Sprintf("--db=%s", config.BR.DB))
+		}
 	}
+
 	return args, nil
 }
 
@@ -235,6 +306,91 @@ func GetOptions(provider v1alpha1.StorageProvider) []string {
 	default:
 		return nil
 	}
+}
+
+/*
+	GetCommitTsFromMetadata get commitTs from mydumper's metadata file
+
+	metadata file format is as follows:
+
+		Started dump at: 2019-06-13 10:00:04
+		SHOW MASTER STATUS:
+			Log: tidb-binlog
+			Pos: 409054741514944513
+			GTID:
+
+		Finished dump at: 2019-06-13 10:00:04
+*/
+func GetCommitTsFromMetadata(backupPath string) (string, error) {
+	var commitTs string
+
+	metaFile := filepath.Join(backupPath, constants.MetaDataFile)
+	if exist := IsFileExist(metaFile); !exist {
+		return commitTs, fmt.Errorf("file %s does not exist or is not regular file", metaFile)
+	}
+	contents, err := ioutil.ReadFile(metaFile)
+	if err != nil {
+		return commitTs, fmt.Errorf("read metadata file %s failed, err: %v", metaFile, err)
+	}
+
+	for _, lineStr := range strings.Split(string(contents), "\n") {
+		if !strings.Contains(lineStr, "Pos") {
+			continue
+		}
+		lineStrSlice := strings.Split(lineStr, ":")
+		if len(lineStrSlice) != 2 {
+			return commitTs, fmt.Errorf("parse mydumper's metadata file %s failed, str: %s", metaFile, lineStr)
+		}
+		commitTs = strings.TrimSpace(lineStrSlice[1])
+		break
+	}
+	return commitTs, nil
+}
+
+// GetBRArchiveSize returns the total size of the backup archive.
+func GetBRArchiveSize(meta *kvbackup.BackupMeta) uint64 {
+	total := uint64(meta.Size())
+	for _, file := range meta.Files {
+		total += file.Size_
+	}
+	return total
+}
+
+// GetBRMetaData get backup metadata from cloud storage
+func GetBRMetaData(provider v1alpha1.StorageProvider) (*kvbackup.BackupMeta, error) {
+	s, err := NewRemoteStorage(provider)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	ctx := context.Background()
+	exist, err := s.Exists(ctx, constants.MetaFile)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		return nil, fmt.Errorf("%s not exist", constants.MetaFile)
+
+	}
+	metaData, err := s.ReadAll(ctx, constants.MetaFile)
+	if err != nil {
+		return nil, err
+	}
+	backupMeta := &kvbackup.BackupMeta{}
+	err = proto.Unmarshal(metaData, backupMeta)
+	if err != nil {
+		return nil, err
+	}
+	return backupMeta, nil
+}
+
+// GetCommitTsFromBRMetaData get backup position from `EndVersion` in BR backup meta
+func GetCommitTsFromBRMetaData(provider v1alpha1.StorageProvider) (uint64, error) {
+	backupMeta, err := GetBRMetaData(provider)
+	if err != nil {
+		return 0, err
+	}
+	return backupMeta.EndVersion, nil
 }
 
 // ConstructArgs constructs the rclone args

@@ -17,9 +17,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/label"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -34,9 +35,9 @@ import (
 
 // PVCControlInterface manages PVCs used in TidbCluster
 type PVCControlInterface interface {
-	UpdateMetaInfo(*v1alpha1.TidbCluster, *corev1.PersistentVolumeClaim, *corev1.Pod) (*corev1.PersistentVolumeClaim, error)
-	UpdatePVC(*v1alpha1.TidbCluster, *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error)
-	DeletePVC(*v1alpha1.TidbCluster, *corev1.PersistentVolumeClaim) error
+	UpdateMetaInfo(runtime.Object, *corev1.PersistentVolumeClaim, *corev1.Pod) (*corev1.PersistentVolumeClaim, error)
+	UpdatePVC(runtime.Object, *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error)
+	DeletePVC(runtime.Object, *corev1.PersistentVolumeClaim) error
 	GetPVC(name, namespace string) (*corev1.PersistentVolumeClaim, error)
 }
 
@@ -58,26 +59,38 @@ func NewRealPVCControl(
 	}
 }
 
-func (rpc *realPVCControl) GetPVC(name, namespace string) (*corev1.PersistentVolumeClaim, error) {
-	return rpc.pvcLister.PersistentVolumeClaims(namespace).Get(name)
+func (c *realPVCControl) GetPVC(name, namespace string) (*corev1.PersistentVolumeClaim, error) {
+	return c.pvcLister.PersistentVolumeClaims(namespace).Get(name)
 }
 
-func (rpc *realPVCControl) DeletePVC(tc *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim) error {
-	ns := tc.GetNamespace()
-	tcName := tc.GetName()
-	pvcName := pvc.GetName()
-	err := rpc.kubeCli.CoreV1().PersistentVolumeClaims(tc.GetNamespace()).Delete(pvcName, nil)
-	if err != nil {
-		klog.Errorf("failed to delete PVC: [%s/%s], TidbCluster: %s, %v", ns, pvcName, tcName, err)
+func (c *realPVCControl) DeletePVC(controller runtime.Object, pvc *corev1.PersistentVolumeClaim) error {
+	controllerMo, ok := controller.(metav1.Object)
+	if !ok {
+		return fmt.Errorf("%T is not a metav1.Object, cannot call setControllerReference", controller)
 	}
-	klog.V(4).Infof("delete PVC: [%s/%s] successfully, TidbCluster: %s", ns, pvcName, tcName)
-	rpc.recordPVCEvent("delete", tc, pvcName, err)
+	kind := controller.GetObjectKind().GroupVersionKind().Kind
+	name := controllerMo.GetName()
+	namespace := controllerMo.GetNamespace()
+
+	pvcName := pvc.GetName()
+	err := c.kubeCli.CoreV1().PersistentVolumeClaims(namespace).Delete(pvcName, nil)
+	if err != nil {
+		klog.Errorf("failed to delete PVC: [%s/%s], %s: %s, %v", namespace, pvcName, kind, name, err)
+	}
+	klog.V(4).Infof("delete PVC: [%s/%s] successfully, %s: %s", namespace, pvcName, kind, name)
+	c.recordPVCEvent("delete", kind, name, controller, pvcName, err)
 	return err
 }
 
-func (rpc *realPVCControl) UpdatePVC(tc *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
-	ns := tc.GetNamespace()
-	tcName := tc.GetName()
+func (c *realPVCControl) UpdatePVC(controller runtime.Object, pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	controllerMo, ok := controller.(metav1.Object)
+	if !ok {
+		return nil, fmt.Errorf("%T is not a metav1.Object, cannot call setControllerReference", controller)
+	}
+	kind := controller.GetObjectKind().GroupVersionKind().Kind
+	name := controllerMo.GetName()
+	namespace := controllerMo.GetNamespace()
+
 	pvcName := pvc.GetName()
 
 	labels := pvc.GetLabels()
@@ -85,20 +98,20 @@ func (rpc *realPVCControl) UpdatePVC(tc *v1alpha1.TidbCluster, pvc *corev1.Persi
 	var updatePVC *corev1.PersistentVolumeClaim
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var updateErr error
-		updatePVC, updateErr = rpc.kubeCli.CoreV1().PersistentVolumeClaims(ns).Update(pvc)
+		updatePVC, updateErr = c.kubeCli.CoreV1().PersistentVolumeClaims(namespace).Update(pvc)
 		if updateErr == nil {
-			klog.Infof("update PVC: [%s/%s] successfully, TidbCluster: %s", ns, pvcName, tcName)
+			klog.Infof("update PVC: [%s/%s] successfully, %s: %s", namespace, pvcName, kind, name)
 			return nil
 		}
-		klog.Errorf("failed to update PVC: [%s/%s], TidbCluster: %s, error: %v", ns, pvcName, tcName, updateErr)
+		klog.Errorf("failed to update PVC: [%s/%s], %s: %s, error: %v", namespace, pvcName, kind, name, updateErr)
 
-		if updated, err := rpc.pvcLister.PersistentVolumeClaims(ns).Get(pvcName); err == nil {
+		if updated, err := c.pvcLister.PersistentVolumeClaims(namespace).Get(pvcName); err == nil {
 			// make a copy so we don't mutate the shared cache
 			pvc = updated.DeepCopy()
 			pvc.Labels = labels
 			pvc.Annotations = ann
 		} else {
-			utilruntime.HandleError(fmt.Errorf("error getting updated PVC %s/%s from lister: %v", ns, pvcName, err))
+			utilruntime.HandleError(fmt.Errorf("error getting updated PVC %s/%s from lister: %v", namespace, pvcName, err))
 		}
 
 		return updateErr
@@ -106,9 +119,15 @@ func (rpc *realPVCControl) UpdatePVC(tc *v1alpha1.TidbCluster, pvc *corev1.Persi
 	return updatePVC, err
 }
 
-func (rpc *realPVCControl) UpdateMetaInfo(tc *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
-	ns := tc.GetNamespace()
-	tcName := tc.GetName()
+func (c *realPVCControl) UpdateMetaInfo(controller runtime.Object, pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
+	controllerMo, ok := controller.(metav1.Object)
+	if !ok {
+		return nil, fmt.Errorf("%T is not a metav1.Object, cannot call setControllerReference", controller)
+	}
+	kind := controller.GetObjectKind().GroupVersionKind().Kind
+	name := controllerMo.GetName()
+	namespace := controllerMo.GetNamespace()
+
 	pvcName := pvc.GetName()
 	podName := pod.GetName()
 
@@ -129,7 +148,7 @@ func (rpc *realPVCControl) UpdateMetaInfo(tc *v1alpha1.TidbCluster, pvc *corev1.
 		pvc.Labels[label.StoreIDLabelKey] == storeID &&
 		pvc.Labels[label.AnnPodNameKey] == podName &&
 		pvc.Annotations[label.AnnPodNameKey] == podName {
-		klog.V(4).Infof("pvc %s/%s already has labels and annotations synced, skipping, TidbCluster: %s", ns, pvcName, tcName)
+		klog.V(4).Infof("pvc %s/%s already has labels and annotations synced, skipping, %s: %s", namespace, pvcName, kind, name)
 		return pvc, nil
 	}
 
@@ -144,20 +163,20 @@ func (rpc *realPVCControl) UpdateMetaInfo(tc *v1alpha1.TidbCluster, pvc *corev1.
 	var updatePVC *corev1.PersistentVolumeClaim
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var updateErr error
-		updatePVC, updateErr = rpc.kubeCli.CoreV1().PersistentVolumeClaims(ns).Update(pvc)
+		updatePVC, updateErr = c.kubeCli.CoreV1().PersistentVolumeClaims(namespace).Update(pvc)
 		if updateErr == nil {
-			klog.V(4).Infof("update PVC: [%s/%s] successfully, TidbCluster: %s", ns, pvcName, tcName)
+			klog.V(4).Infof("update PVC: [%s/%s] successfully, %s: %s", namespace, pvcName, kind, name)
 			return nil
 		}
-		klog.Errorf("failed to update PVC: [%s/%s], TidbCluster: %s, error: %v", ns, pvcName, tcName, updateErr)
+		klog.Errorf("failed to update PVC: [%s/%s], %s: %s, error: %v", namespace, pvcName, kind, name, updateErr)
 
-		if updated, err := rpc.pvcLister.PersistentVolumeClaims(ns).Get(pvcName); err == nil {
+		if updated, err := c.pvcLister.PersistentVolumeClaims(namespace).Get(pvcName); err == nil {
 			// make a copy so we don't mutate the shared cache
 			pvc = updated.DeepCopy()
 			pvc.Labels = labels
 			pvc.Annotations = ann
 		} else {
-			utilruntime.HandleError(fmt.Errorf("error getting updated PVC %s/%s from lister: %v", ns, pvcName, err))
+			utilruntime.HandleError(fmt.Errorf("error getting updated PVC %s/%s from lister: %v", namespace, pvcName, err))
 		}
 
 		return updateErr
@@ -165,18 +184,17 @@ func (rpc *realPVCControl) UpdateMetaInfo(tc *v1alpha1.TidbCluster, pvc *corev1.
 	return updatePVC, err
 }
 
-func (rpc *realPVCControl) recordPVCEvent(verb string, tc *v1alpha1.TidbCluster, pvcName string, err error) {
-	tcName := tc.GetName()
+func (c *realPVCControl) recordPVCEvent(verb, kind, name string, object runtime.Object, pvcName string, err error) {
 	if err == nil {
 		reason := fmt.Sprintf("Successful%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s PVC %s in TidbCluster %s successful",
-			strings.ToLower(verb), pvcName, tcName)
-		rpc.recorder.Event(tc, corev1.EventTypeNormal, reason, msg)
+		msg := fmt.Sprintf("%s PVC %s in %s %s successful",
+			strings.ToLower(verb), pvcName, kind, name)
+		c.recorder.Event(object, corev1.EventTypeNormal, reason, msg)
 	} else {
 		reason := fmt.Sprintf("Failed%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s PVC %s in TidbCluster %s failed error: %s",
-			strings.ToLower(verb), pvcName, tcName, err)
-		rpc.recorder.Event(tc, corev1.EventTypeWarning, reason, msg)
+		msg := fmt.Sprintf("%s PVC %s in %s %s failed error: %s",
+			strings.ToLower(verb), pvcName, kind, name, err)
+		c.recorder.Event(object, corev1.EventTypeWarning, reason, msg)
 	}
 }
 
@@ -199,43 +217,43 @@ func NewFakePVCControl(pvcInformer coreinformers.PersistentVolumeClaimInformer) 
 }
 
 // SetUpdatePVCError sets the error attributes of updatePVCTracker
-func (fpc *FakePVCControl) SetUpdatePVCError(err error, after int) {
-	fpc.updatePVCTracker.SetError(err).SetAfter(after)
+func (c *FakePVCControl) SetUpdatePVCError(err error, after int) {
+	c.updatePVCTracker.SetError(err).SetAfter(after)
 }
 
 // SetDeletePVCError sets the error attributes of deletePVCTracker
-func (fpc *FakePVCControl) SetDeletePVCError(err error, after int) {
-	fpc.deletePVCTracker.SetError(err).SetAfter(after)
+func (c *FakePVCControl) SetDeletePVCError(err error, after int) {
+	c.deletePVCTracker.SetError(err).SetAfter(after)
 }
 
 // DeletePVC deletes the pvc
-func (fpc *FakePVCControl) DeletePVC(_ *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim) error {
-	defer fpc.deletePVCTracker.Inc()
-	if fpc.deletePVCTracker.ErrorReady() {
-		defer fpc.deletePVCTracker.Reset()
-		return fpc.deletePVCTracker.GetError()
+func (c *FakePVCControl) DeletePVC(_ runtime.Object, pvc *corev1.PersistentVolumeClaim) error {
+	defer c.deletePVCTracker.Inc()
+	if c.deletePVCTracker.ErrorReady() {
+		defer c.deletePVCTracker.Reset()
+		return c.deletePVCTracker.GetError()
 	}
 
-	return fpc.PVCIndexer.Delete(pvc)
+	return c.PVCIndexer.Delete(pvc)
 }
 
 // UpdatePVC updates the annotation, labels and spec of pvc
-func (fpc *FakePVCControl) UpdatePVC(_ *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
-	defer fpc.updatePVCTracker.Inc()
-	if fpc.updatePVCTracker.ErrorReady() {
-		defer fpc.updatePVCTracker.Reset()
-		return nil, fpc.updatePVCTracker.GetError()
+func (c *FakePVCControl) UpdatePVC(_ runtime.Object, pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	defer c.updatePVCTracker.Inc()
+	if c.updatePVCTracker.ErrorReady() {
+		defer c.updatePVCTracker.Reset()
+		return nil, c.updatePVCTracker.GetError()
 	}
 
-	return pvc, fpc.PVCIndexer.Update(pvc)
+	return pvc, c.PVCIndexer.Update(pvc)
 }
 
 // UpdateMetaInfo updates the meta info of pvc
-func (fpc *FakePVCControl) UpdateMetaInfo(_ *v1alpha1.TidbCluster, pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
-	defer fpc.updatePVCTracker.Inc()
-	if fpc.updatePVCTracker.ErrorReady() {
-		defer fpc.updatePVCTracker.Reset()
-		return nil, fpc.updatePVCTracker.GetError()
+func (c *FakePVCControl) UpdateMetaInfo(_ runtime.Object, pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
+	defer c.updatePVCTracker.Inc()
+	if c.updatePVCTracker.ErrorReady() {
+		defer c.updatePVCTracker.Reset()
+		return nil, c.updatePVCTracker.GetError()
 	}
 	if pvc.Labels == nil {
 		pvc.Labels = make(map[string]string)
@@ -248,12 +266,12 @@ func (fpc *FakePVCControl) UpdateMetaInfo(_ *v1alpha1.TidbCluster, pvc *corev1.P
 	setIfNotEmpty(pvc.Labels, label.StoreIDLabelKey, pod.Labels[label.StoreIDLabelKey])
 	setIfNotEmpty(pvc.Labels, label.AnnPodNameKey, pod.GetName())
 	setIfNotEmpty(pvc.Annotations, label.AnnPodNameKey, pod.GetName())
-	return nil, fpc.PVCIndexer.Update(pvc)
+	return nil, c.PVCIndexer.Update(pvc)
 }
 
-func (fpc *FakePVCControl) GetPVC(name, namespace string) (*corev1.PersistentVolumeClaim, error) {
-	defer fpc.updatePVCTracker.Inc()
-	obj, existed, err := fpc.PVCIndexer.GetByKey(fmt.Sprintf("%s/%s", namespace, name))
+func (c *FakePVCControl) GetPVC(name, namespace string) (*corev1.PersistentVolumeClaim, error) {
+	defer c.updatePVCTracker.Inc()
+	obj, existed, err := c.PVCIndexer.GetByKey(fmt.Sprintf("%s/%s", namespace, name))
 	if err != nil {
 		return nil, err
 	}

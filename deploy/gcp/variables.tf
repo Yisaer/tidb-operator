@@ -24,11 +24,11 @@ variable "node_locations" {
 
 variable "tidb_version" {
   description = "TiDB version"
-  default     = "v3.0.13"
+  default     = "v4.0.7"
 }
 
 variable "tidb_operator_version" {
-  default = "v1.1.0"
+  default = "v1.1.6"
 }
 
 variable "tidb_operator_chart_version" {
@@ -98,17 +98,17 @@ variable "tikv_instance_type" {}
 variable "tidb_instance_type" {}
 
 variable "pd_image_type" {
-  description = "PD image type, avaiable: UBUNTU/COS"
+  description = "PD image type, available: UBUNTU/COS"
   default     = "COS"
 }
 
 variable "tidb_image_type" {
-  description = "TiDB image type, avaiable: UBUNTU/COS"
+  description = "TiDB image type, available: UBUNTU/COS"
   default     = "COS"
 }
 
 variable "tikv_image_type" {
-  description = "TiKV image type, avaiable: UBUNTU/COS"
+  description = "TiKV image type, available: UBUNTU/COS"
   default     = "COS"
 }
 

@@ -320,8 +320,8 @@ func newFakeTidbClusterControl() (
 	tiflashMemberManager := mm.NewFakeTiFlashMemberManager()
 	ticdcMemberManager := mm.NewFakeTiCDCMemberManager()
 	discoveryManager := mm.NewFakeDiscoveryManger()
-	podRestarter := mm.NewFakePodRestarter()
 	statusManager := mm.NewFakeTidbClusterStatusManager()
+	pvcResizer := mm.NewFakePVCResizer()
 	control := NewDefaultTidbClusterControl(
 		tcUpdater,
 		pdMemberManager,
@@ -331,12 +331,12 @@ func newFakeTidbClusterControl() (
 		metaManager,
 		orphanPodCleaner,
 		pvcCleaner,
+		pvcResizer,
 		pumpMemberManager,
 		tiflashMemberManager,
 		ticdcMemberManager,
 		discoveryManager,
 		statusManager,
-		podRestarter,
 		&tidbClusterConditionUpdater{},
 		recorder,
 	)
@@ -357,30 +357,30 @@ func newTidbClusterForTidbClusterControl() *v1alpha1.TidbCluster {
 		},
 		Spec: v1alpha1.TidbClusterSpec{
 			Version: "v3.0.8",
-			PD: v1alpha1.PDSpec{
+			PD: &v1alpha1.PDSpec{
 				Replicas:  3,
 				BaseImage: "pingcap/pd",
-				Config:    &v1alpha1.PDConfig{},
+				Config:    v1alpha1.NewPDConfig(),
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: resource.MustParse("10G"),
 					},
 				},
 			},
-			TiKV: v1alpha1.TiKVSpec{
+			TiKV: &v1alpha1.TiKVSpec{
 				Replicas:  3,
 				BaseImage: "pingcap/tikv",
-				Config:    &v1alpha1.TiKVConfig{},
+				Config:    v1alpha1.NewTiKVConfig(),
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: resource.MustParse("10G"),
 					},
 				},
 			},
-			TiDB: v1alpha1.TiDBSpec{
+			TiDB: &v1alpha1.TiDBSpec{
 				Replicas:  2,
 				BaseImage: "pingcap/tidb",
-				Config:    &v1alpha1.TiDBConfig{},
+				Config:    v1alpha1.NewTiDBConfig(),
 			},
 		},
 	}

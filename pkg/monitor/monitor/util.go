@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
@@ -39,6 +40,10 @@ func GetMonitorObjectName(monitor *v1alpha1.TidbMonitor) string {
 	return fmt.Sprintf("%s-monitor", monitor.Name)
 }
 
+func GetMonitorObjectNameCrossNamespace(monitor *v1alpha1.TidbMonitor) string {
+	return fmt.Sprintf("%s-%s-monitor", monitor.Namespace, monitor.Name)
+}
+
 func buildTidbMonitorLabel(name string) map[string]string {
 	return label.NewMonitor().Instance(name).Monitor().Labels()
 }
@@ -48,11 +53,14 @@ func buildTidbMonitorLabel(name string) map[string]string {
 func getMonitorConfigMap(tc *v1alpha1.TidbCluster, monitor *v1alpha1.TidbMonitor) (*core.ConfigMap, error) {
 
 	var releaseNamespaces []string
+	var releaseClusters []string
 	for _, cluster := range monitor.Spec.Clusters {
 		releaseNamespaces = append(releaseNamespaces, cluster.Namespace)
+		releaseClusters = append(releaseClusters, cluster.Name)
 	}
 
-	targetPattern, err := config.NewRegexp(tc.Name)
+	relabelConfigsRegex := strings.Join(releaseClusters, "|")
+	targetPattern, err := config.NewRegexp(relabelConfigsRegex)
 	if err != nil {
 		return nil, err
 	}
@@ -120,18 +128,6 @@ func getMonitorServiceAccount(monitor *v1alpha1.TidbMonitor) *core.ServiceAccoun
 	return sa
 }
 
-func getMonitorClusterRole(monitor *v1alpha1.TidbMonitor, policyRules []rbac.PolicyRule) *rbac.ClusterRole {
-	return &rbac.ClusterRole{
-		ObjectMeta: meta.ObjectMeta{
-			Name:            GetMonitorObjectName(monitor),
-			Namespace:       monitor.Namespace,
-			Labels:          buildTidbMonitorLabel(monitor.Name),
-			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
-		},
-		Rules: policyRules,
-	}
-}
-
 func getMonitorRole(monitor *v1alpha1.TidbMonitor, policyRules []rbac.PolicyRule) *rbac.Role {
 	return &rbac.Role{
 		ObjectMeta: meta.ObjectMeta{
@@ -144,10 +140,22 @@ func getMonitorRole(monitor *v1alpha1.TidbMonitor, policyRules []rbac.PolicyRule
 	}
 }
 
-func getMonitorClusterRoleBinding(sa *core.ServiceAccount, cr *rbac.ClusterRole, monitor *v1alpha1.TidbMonitor) *rbac.ClusterRoleBinding {
+func getMonitorClusterRole(monitor *v1alpha1.TidbMonitor, policyRules []rbac.PolicyRule) *rbac.ClusterRole {
+	return &rbac.ClusterRole{
+		ObjectMeta: meta.ObjectMeta{
+			Name:            GetMonitorObjectNameCrossNamespace(monitor),
+			Namespace:       monitor.Namespace,
+			Labels:          buildTidbMonitorLabel(monitor.Name),
+			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
+		},
+		Rules: policyRules,
+	}
+}
+
+func getMonitorClusterRoleBinding(sa *core.ServiceAccount, role *rbac.ClusterRole, monitor *v1alpha1.TidbMonitor) *rbac.ClusterRoleBinding {
 	return &rbac.ClusterRoleBinding{
 		ObjectMeta: meta.ObjectMeta{
-			Name:            GetMonitorObjectName(monitor),
+			Name:            GetMonitorObjectNameCrossNamespace(monitor),
 			Namespace:       monitor.Namespace,
 			Labels:          buildTidbMonitorLabel(monitor.Name),
 			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
@@ -162,7 +170,7 @@ func getMonitorClusterRoleBinding(sa *core.ServiceAccount, cr *rbac.ClusterRole,
 		},
 		RoleRef: rbac.RoleRef{
 			Kind:     "ClusterRole",
-			Name:     cr.Name,
+			Name:     role.Name,
 			APIGroup: "rbac.authorization.k8s.io",
 		},
 	}
@@ -199,6 +207,10 @@ func getMonitorDeployment(sa *core.ServiceAccount, config *core.ConfigMap, secre
 	prometheusContainer := getMonitorPrometheusContainer(monitor, tc)
 	reloaderContainer := getMonitorReloaderContainer(monitor, tc)
 	deployment.Spec.Template.Spec.Containers = append(deployment.Spec.Template.Spec.Containers, prometheusContainer, reloaderContainer)
+	additionalContainers := monitor.Spec.AdditionalContainers
+	if len(additionalContainers) > 0 {
+		deployment.Spec.Template.Spec.Containers = append(deployment.Spec.Template.Spec.Containers, additionalContainers...)
+	}
 	if monitor.Spec.Grafana != nil {
 		grafanaContainer := getMonitorGrafanaContainer(secret, monitor, tc)
 		deployment.Spec.Template.Spec.Containers = append(deployment.Spec.Template.Spec.Containers, grafanaContainer)
@@ -213,6 +225,11 @@ func getMonitorDeployment(sa *core.ServiceAccount, config *core.ConfigMap, secre
 		deployment.Annotations = map[string]string{}
 	}
 	deployment.Annotations[controller.LastAppliedPodTemplate] = string(b)
+
+	if monitor.Spec.ImagePullSecrets != nil {
+		deployment.Spec.Template.Spec.ImagePullSecrets = monitor.Spec.ImagePullSecrets
+	}
+
 	return deployment, nil
 }
 
@@ -268,6 +285,10 @@ chmod 777 /data/prometheus /data/grafana
 		"-c",
 		c,
 	}
+	alertManagerRulesVersion := tc.TiDBImage()
+	if monitor.Spec.AlertManagerRulesVersion != nil {
+		alertManagerRulesVersion = fmt.Sprintf("tidb:%s", *monitor.Spec.AlertManagerRulesVersion)
+	}
 	container := core.Container{
 		Name:  "monitor-initializer",
 		Image: fmt.Sprintf("%s:%s", monitor.Spec.Initializer.BaseImage, monitor.Spec.Initializer.Version),
@@ -290,7 +311,7 @@ chmod 777 /data/prometheus /data/grafana
 			},
 			{
 				Name:  "TIDB_VERSION",
-				Value: tc.TiDBImage(),
+				Value: alertManagerRulesVersion,
 			},
 			{
 				Name:  "GF_TIDB_PROMETHEUS_URL",
@@ -320,7 +341,7 @@ chmod 777 /data/prometheus /data/grafana
 				Name:      "monitor-data",
 			},
 		},
-		Resources: controller.ContainerResource(monitor.Spec.Initializer.Resources),
+		Resources: controller.ContainerResource(monitor.Spec.Initializer.ResourceRequirements),
 	}
 
 	if monitor.Spec.Initializer.ImagePullPolicy != nil {
@@ -357,6 +378,14 @@ chmod 777 /data/prometheus /data/grafana
 			})
 
 	}
+	var envOverrides []core.EnvVar
+	for k, v := range monitor.Spec.Initializer.Envs {
+		envOverrides = append(envOverrides, core.EnvVar{
+			Name:  k,
+			Value: v,
+		})
+	}
+	container.Env = util.AppendOverwriteEnv(container.Env, envOverrides)
 	return container
 }
 
@@ -364,9 +393,14 @@ func getMonitorPrometheusContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.T
 	c := core.Container{
 		Name:      "prometheus",
 		Image:     fmt.Sprintf("%s:%s", monitor.Spec.Prometheus.BaseImage, monitor.Spec.Prometheus.Version),
-		Resources: controller.ContainerResource(monitor.Spec.Prometheus.Resources),
+		Resources: controller.ContainerResource(monitor.Spec.Prometheus.ResourceRequirements),
 		Command: []string{
 			"/bin/prometheus",
+			"--web.enable-admin-api",
+			"--web.enable-lifecycle",
+			"--config.file=/etc/prometheus/prometheus.yml",
+			"--storage.tsdb.path=/data/prometheus",
+			fmt.Sprintf("--storage.tsdb.retention=%dd", monitor.Spec.Prometheus.ReserveDays),
 		},
 		Ports: []core.ContainerPort{
 			{
@@ -398,24 +432,17 @@ func getMonitorPrometheusContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.T
 			},
 		},
 	}
-	commandOptions := []string{"--web.enable-admin-api",
-		"--web.enable-lifecycle",
-		"--config.file=/etc/prometheus/prometheus.yml",
-		"--storage.tsdb.path=/data/prometheus",
-		fmt.Sprintf("--storage.tsdb.retention=%dd", monitor.Spec.Prometheus.ReserveDays)}
-
-	if monitor.Spec.Prometheus.Config != nil && len(monitor.Spec.Prometheus.Config.CommandOptions) > 0 {
-		commandOptions = monitor.Spec.Prometheus.Config.CommandOptions
-	}
-	c.Command = append(c.Command, commandOptions...)
 
 	if len(monitor.Spec.Prometheus.LogLevel) > 0 {
 		c.Command = append(c.Command, fmt.Sprintf("--log.level=%s", monitor.Spec.Prometheus.LogLevel))
 	}
+	if monitor.Spec.Prometheus.Config != nil && len(monitor.Spec.Prometheus.Config.CommandOptions) > 0 {
+		c.Command = append(c.Command, monitor.Spec.Prometheus.Config.CommandOptions...)
+	}
 
 	if tc.IsTLSClusterEnabled() {
 		c.VolumeMounts = append(c.VolumeMounts, core.VolumeMount{
-			Name:      "cluster-client-tls",
+			Name:      util.ClusterClientVolName,
 			MountPath: util.ClusterClientTLSPath,
 			ReadOnly:  true,
 		})
@@ -430,7 +457,7 @@ func getMonitorGrafanaContainer(secret *core.Secret, monitor *v1alpha1.TidbMonit
 	c := core.Container{
 		Name:      "grafana",
 		Image:     fmt.Sprintf("%s:%s", monitor.Spec.Grafana.BaseImage, monitor.Spec.Grafana.Version),
-		Resources: controller.ContainerResource(monitor.Spec.Grafana.Resources),
+		Resources: controller.ContainerResource(monitor.Spec.Grafana.ResourceRequirements),
 		Ports: []core.ContainerPort{
 			{
 				Name:          "grafana",
@@ -492,15 +519,17 @@ func getMonitorGrafanaContainer(secret *core.Secret, monitor *v1alpha1.TidbMonit
 			},
 		},
 	}
+	if monitor.Spec.Grafana.ImagePullPolicy != nil {
+		c.ImagePullPolicy = *monitor.Spec.Grafana.ImagePullPolicy
+	}
+	var envOverrides []core.EnvVar
 	for k, v := range monitor.Spec.Grafana.Envs {
-		c.Env = append(c.Env, core.EnvVar{
+		envOverrides = append(envOverrides, core.EnvVar{
 			Name:  k,
 			Value: v,
 		})
 	}
-	if monitor.Spec.Grafana.ImagePullPolicy != nil {
-		c.ImagePullPolicy = *monitor.Spec.Grafana.ImagePullPolicy
-	}
+	c.Env = util.AppendOverwriteEnv(c.Env, envOverrides)
 	sort.Sort(util.SortEnvByName(c.Env))
 	return c
 }
@@ -534,7 +563,7 @@ func getMonitorReloaderContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.Tid
 				MountPath: "/data",
 			},
 		},
-		Resources: controller.ContainerResource(monitor.Spec.Reloader.Resources),
+		Resources: controller.ContainerResource(monitor.Spec.Reloader.ResourceRequirements),
 		Env: []core.EnvVar{
 			{
 				Name:  "TZ",
@@ -625,7 +654,7 @@ func getMonitorVolumes(config *core.ConfigMap, monitor *v1alpha1.TidbMonitor, tc
 	if tc.IsTLSClusterEnabled() {
 		defaultMode := int32(420)
 		tlsPDClient := core.Volume{
-			Name: "cluster-client-tls",
+			Name: util.ClusterClientVolName,
 			VolumeSource: core.VolumeSource{
 				Secret: &core.SecretVolumeSource{
 					SecretName:  util.ClusterClientTLSSecretName(tc.Name),
@@ -664,12 +693,15 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 		grafanaPortName = *monitor.BaseGrafanaSpec().PortName()
 	}
 
-	promethuesName := prometheusName(monitor)
+	prometheusName := prometheusName(monitor)
+	monitorLabel := label.NewMonitor().Instance(monitor.Name).Monitor()
+	promeLabel := monitorLabel.Copy().UsedBy("prometheus")
+	grafanaLabel := monitorLabel.Copy().UsedBy("grafana")
 	prometheusService := &core.Service{
 		ObjectMeta: meta.ObjectMeta{
-			Name:            promethuesName,
+			Name:            prometheusName,
 			Namespace:       monitor.Namespace,
-			Labels:          buildTidbMonitorLabel(monitor.Name),
+			Labels:          promeLabel.Labels(),
 			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
 			Annotations:     monitor.Spec.Prometheus.Service.Annotations,
 		},
@@ -689,6 +721,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 	if monitor.BasePrometheusSpec().ServiceType() == core.ServiceTypeLoadBalancer {
 		if monitor.Spec.Prometheus.Service.LoadBalancerIP != nil {
 			prometheusService.Spec.LoadBalancerIP = *monitor.Spec.Prometheus.Service.LoadBalancerIP
+		}
+		if monitor.Spec.Prometheus.Service.LoadBalancerSourceRanges != nil {
+			prometheusService.Spec.LoadBalancerSourceRanges = monitor.Spec.Prometheus.Service.LoadBalancerSourceRanges
 		}
 	}
 
@@ -718,6 +753,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 		if monitor.Spec.Reloader.Service.LoadBalancerIP != nil {
 			reloaderService.Spec.LoadBalancerIP = *monitor.Spec.Reloader.Service.LoadBalancerIP
 		}
+		if monitor.Spec.Reloader.Service.LoadBalancerSourceRanges != nil {
+			reloaderService.Spec.LoadBalancerSourceRanges = monitor.Spec.Reloader.Service.LoadBalancerSourceRanges
+		}
 	}
 
 	services = append(services, prometheusService, reloaderService)
@@ -726,7 +764,7 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 			ObjectMeta: meta.ObjectMeta{
 				Name:            grafanaName(monitor),
 				Namespace:       monitor.Namespace,
-				Labels:          buildTidbMonitorLabel(monitor.Name),
+				Labels:          grafanaLabel.Labels(),
 				OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
 				Annotations:     monitor.Spec.Grafana.Service.Annotations,
 			},
@@ -747,6 +785,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 		if monitor.BaseGrafanaSpec().ServiceType() == core.ServiceTypeLoadBalancer {
 			if monitor.Spec.Grafana.Service.LoadBalancerIP != nil {
 				grafanaService.Spec.LoadBalancerIP = *monitor.Spec.Grafana.Service.LoadBalancerIP
+			}
+			if monitor.Spec.Grafana.Service.LoadBalancerSourceRanges != nil {
+				grafanaService.Spec.LoadBalancerSourceRanges = monitor.Spec.Grafana.Service.LoadBalancerSourceRanges
 			}
 		}
 
@@ -834,4 +875,17 @@ func prometheusName(monitor *v1alpha1.TidbMonitor) string {
 
 func grafanaName(monitor *v1alpha1.TidbMonitor) string {
 	return fmt.Sprintf("%s-grafana", monitor.Name)
+}
+
+func defaultTidbMonitor(monitor *v1alpha1.TidbMonitor) {
+	for id, tcRef := range monitor.Spec.Clusters {
+		if len(tcRef.Namespace) < 1 {
+			tcRef.Namespace = monitor.Namespace
+		}
+		monitor.Spec.Clusters[id] = tcRef
+	}
+	retainPVP := core.PersistentVolumeReclaimRetain
+	if monitor.Spec.PVReclaimPolicy == nil {
+		monitor.Spec.PVReclaimPolicy = &retainPVP
+	}
 }

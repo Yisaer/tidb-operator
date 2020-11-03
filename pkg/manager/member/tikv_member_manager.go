@@ -15,11 +15,13 @@ package member
 
 import (
 	"fmt"
-	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
@@ -34,13 +36,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	v1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 	"k8s.io/utils/pointer"
 )
 
 const (
+	// tikvDataVolumeMountPath is the mount path for tikv data volume
+	tikvDataVolumeMountPath = "/var/lib/tikv"
+
 	// tikvClusterCertPath is where the cert for inter-cluster communication stored (if any)
 	tikvClusterCertPath = "/var/lib/tikv-tls"
 
@@ -50,51 +54,23 @@ const (
 
 // tikvMemberManager implements manager.Manager.
 type tikvMemberManager struct {
-	setControl                   controller.StatefulSetControlInterface
-	svcControl                   controller.ServiceControlInterface
-	pdControl                    pdapi.PDControlInterface
-	typedControl                 controller.TypedControlInterface
-	setLister                    v1.StatefulSetLister
-	svcLister                    corelisters.ServiceLister
-	podLister                    corelisters.PodLister
-	nodeLister                   corelisters.NodeLister
-	autoFailover                 bool
-	tikvFailover                 Failover
-	tikvScaler                   Scaler
-	tikvUpgrader                 Upgrader
-	tikvStatefulSetIsUpgradingFn func(corelisters.PodLister, pdapi.PDControlInterface, *apps.StatefulSet, *v1alpha1.TidbCluster) (bool, error)
+	deps                     *controller.Dependencies
+	failover                 Failover
+	scaler                   Scaler
+	upgrader                 Upgrader
+	statefulSetIsUpgradingFn func(corelisters.PodLister, pdapi.PDControlInterface, *apps.StatefulSet, *v1alpha1.TidbCluster) (bool, error)
 }
 
 // NewTiKVMemberManager returns a *tikvMemberManager
-func NewTiKVMemberManager(
-	pdControl pdapi.PDControlInterface,
-	setControl controller.StatefulSetControlInterface,
-	svcControl controller.ServiceControlInterface,
-	typedControl controller.TypedControlInterface,
-	setLister v1.StatefulSetLister,
-	svcLister corelisters.ServiceLister,
-	podLister corelisters.PodLister,
-	nodeLister corelisters.NodeLister,
-	autoFailover bool,
-	tikvFailover Failover,
-	tikvScaler Scaler,
-	tikvUpgrader Upgrader) manager.Manager {
-	kvmm := tikvMemberManager{
-		pdControl:    pdControl,
-		podLister:    podLister,
-		nodeLister:   nodeLister,
-		setControl:   setControl,
-		svcControl:   svcControl,
-		typedControl: typedControl,
-		setLister:    setLister,
-		svcLister:    svcLister,
-		autoFailover: autoFailover,
-		tikvFailover: tikvFailover,
-		tikvScaler:   tikvScaler,
-		tikvUpgrader: tikvUpgrader,
+func NewTiKVMemberManager(deps *controller.Dependencies, failover Failover, scaler Scaler, upgrader Upgrader) manager.Manager {
+	m := &tikvMemberManager{
+		deps:     deps,
+		failover: failover,
+		scaler:   scaler,
+		upgrader: upgrader,
 	}
-	kvmm.tikvStatefulSetIsUpgradingFn = tikvStatefulSetIsUpgrading
-	return &kvmm
+	m.statefulSetIsUpgradingFn = tikvStatefulSetIsUpgrading
+	return m
 }
 
 // SvcConfig corresponds to a K8s service
@@ -107,11 +83,16 @@ type SvcConfig struct {
 }
 
 // Sync fulfills the manager.Manager interface
-func (tkmm *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
+func (m *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
+	// If tikv is not specified return
+	if tc.Spec.TiKV == nil {
+		return nil
+	}
+
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
-	if !tc.PDIsAvailable() {
+	if tc.Spec.PD != nil && !tc.PDIsAvailable() {
 		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName)
 	}
 
@@ -125,14 +106,14 @@ func (tkmm *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 		},
 	}
 	for _, svc := range svcList {
-		if err := tkmm.syncServiceForTidbCluster(tc, svc); err != nil {
+		if err := m.syncServiceForTidbCluster(tc, svc); err != nil {
 			return err
 		}
 	}
-	return tkmm.syncStatefulSetForTidbCluster(tc)
+	return m.syncStatefulSetForTidbCluster(tc)
 }
 
-func (tkmm *tikvMemberManager) syncServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) error {
+func (m *tikvMemberManager) syncServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) error {
 	if tc.Spec.Paused {
 		klog.V(4).Infof("tikv cluster %s/%s is paused, skip syncing for tikv service", tc.GetNamespace(), tc.GetName())
 		return nil
@@ -142,16 +123,16 @@ func (tkmm *tikvMemberManager) syncServiceForTidbCluster(tc *v1alpha1.TidbCluste
 	tcName := tc.GetName()
 
 	newSvc := getNewServiceForTidbCluster(tc, svcConfig)
-	oldSvcTmp, err := tkmm.svcLister.Services(ns).Get(svcConfig.MemberName(tcName))
+	oldSvcTmp, err := m.deps.ServiceLister.Services(ns).Get(svcConfig.MemberName(tcName))
 	if errors.IsNotFound(err) {
 		err = controller.SetServiceLastAppliedConfigAnnotation(newSvc)
 		if err != nil {
 			return err
 		}
-		return tkmm.svcControl.CreateService(tc, newSvc)
+		return m.deps.ServiceControl.CreateService(tc, newSvc)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("syncServiceForTidbCluster: failed to get svc %s for cluster %s/%s, error: %s", svcConfig.MemberName(tcName), ns, tcName, err)
 	}
 
 	oldSvc := oldSvcTmp.DeepCopy()
@@ -169,26 +150,26 @@ func (tkmm *tikvMemberManager) syncServiceForTidbCluster(tc *v1alpha1.TidbCluste
 			return err
 		}
 		svc.Spec.ClusterIP = oldSvc.Spec.ClusterIP
-		_, err = tkmm.svcControl.UpdateService(tc, &svc)
+		_, err = m.deps.ServiceControl.UpdateService(tc, &svc)
 		return err
 	}
 
 	return nil
 }
 
-func (tkmm *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCluster) error {
+func (m *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCluster) error {
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
-	oldSetTmp, err := tkmm.setLister.StatefulSets(ns).Get(controller.TiKVMemberName(tcName))
+	oldSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.TiKVMemberName(tcName))
 	if err != nil && !errors.IsNotFound(err) {
-		return err
+		return fmt.Errorf("syncStatefulSetForTidbCluster: failed to get sts %s for cluster %s/%s, error: %s", controller.TiKVMemberName(tcName), ns, tcName, err)
 	}
 	setNotExist := errors.IsNotFound(err)
 
 	oldSet := oldSetTmp.DeepCopy()
 
-	if err := tkmm.syncTidbClusterStatus(tc, oldSet); err != nil {
+	if err := m.syncTidbClusterStatus(tc, oldSet); err != nil {
 		return err
 	}
 
@@ -197,14 +178,19 @@ func (tkmm *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCl
 		return nil
 	}
 
-	cm, err := tkmm.syncTiKVConfigMap(tc, oldSet)
+	cm, err := m.syncTiKVConfigMap(tc, oldSet)
 	if err != nil {
 		return err
 	}
 
 	// Recover failed stores if any before generating desired statefulset
 	if len(tc.Status.TiKV.FailureStores) > 0 {
-		tkmm.tikvFailover.Recover(tc)
+		m.failover.RemoveUndesiredFailures(tc)
+	}
+	if len(tc.Status.TiKV.FailureStores) > 0 &&
+		tc.Spec.TiKV.RecoverFailover &&
+		shouldRecover(tc, label.TiKVLabelVal, m.deps.PodLister) {
+		m.failover.Recover(tc)
 	}
 
 	newSet, err := getNewTiKVSetForTidbCluster(tc, cm)
@@ -216,7 +202,7 @@ func (tkmm *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCl
 		if err != nil {
 			return err
 		}
-		err = tkmm.setControl.CreateStatefulSet(tc, newSet)
+		err = m.deps.StatefulSetControl.CreateStatefulSet(tc, newSet)
 		if err != nil {
 			return err
 		}
@@ -224,32 +210,40 @@ func (tkmm *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbCl
 		return nil
 	}
 
-	if _, err := tkmm.setStoreLabelsForTiKV(tc); err != nil {
+	if _, err := m.setStoreLabelsForTiKV(tc); err != nil {
 		return err
 	}
 
-	if !templateEqual(newSet, oldSet) || tc.Status.TiKV.Phase == v1alpha1.UpgradePhase {
-		if err := tkmm.tikvUpgrader.Upgrade(tc, oldSet, newSet); err != nil {
-			return err
-		}
-	}
-
-	if err := tkmm.tikvScaler.Scale(tc, oldSet, newSet); err != nil {
+	// Scaling takes precedence over upgrading because:
+	// - if a store fails in the upgrading, users may want to delete it or add
+	//   new replicas
+	// - it's ok to scale in the middle of upgrading (in statefulset controller
+	//   scaling takes precedence over upgrading too)
+	if err := m.scaler.Scale(tc, oldSet, newSet); err != nil {
 		return err
 	}
 
-	if tkmm.autoFailover && tc.Spec.TiKV.MaxFailoverCount != nil {
+	// Perform failover logic if necessary. Note that this will only update
+	// TidbCluster status. The actual scaling performs in next sync loop (if a
+	// new replica needs to be added).
+	if m.deps.CLIConfig.AutoFailover && tc.Spec.TiKV.MaxFailoverCount != nil {
 		if tc.TiKVAllPodsStarted() && !tc.TiKVAllStoresReady() {
-			if err := tkmm.tikvFailover.Failover(tc); err != nil {
+			if err := m.failover.Failover(tc); err != nil {
 				return err
 			}
 		}
 	}
 
-	return updateStatefulSet(tkmm.setControl, tc, newSet, oldSet)
+	if !templateEqual(newSet, oldSet) || tc.Status.TiKV.Phase == v1alpha1.UpgradePhase {
+		if err := m.upgrader.Upgrade(tc, oldSet, newSet); err != nil {
+			return err
+		}
+	}
+
+	return updateStatefulSet(m.deps.StatefulSetControl, tc, newSet, oldSet)
 }
 
-func (tkmm *tikvMemberManager) syncTiKVConfigMap(tc *v1alpha1.TidbCluster, set *apps.StatefulSet) (*corev1.ConfigMap, error) {
+func (m *tikvMemberManager) syncTiKVConfigMap(tc *v1alpha1.TidbCluster, set *apps.StatefulSet) (*corev1.ConfigMap, error) {
 	// For backward compatibility, only sync tidb configmap when .tikv.config is non-nil
 	if tc.Spec.TiKV.Config == nil {
 		return nil, nil
@@ -258,16 +252,19 @@ func (tkmm *tikvMemberManager) syncTiKVConfigMap(tc *v1alpha1.TidbCluster, set *
 	if err != nil {
 		return nil, err
 	}
-	if set != nil && tc.BaseTiKVSpec().ConfigUpdateStrategy() == v1alpha1.ConfigUpdateStrategyInPlace {
-		inUseName := FindConfigMapVolume(&set.Spec.Template.Spec, func(name string) bool {
+
+	var inUseName string
+	if set != nil {
+		inUseName = FindConfigMapVolume(&set.Spec.Template.Spec, func(name string) bool {
 			return strings.HasPrefix(name, controller.TiKVMemberName(tc.Name))
 		})
-		if inUseName != "" {
-			newCm.Name = inUseName
-		}
 	}
 
-	return tkmm.typedControl.CreateOrUpdateConfigMap(tc, newCm)
+	err = updateConfigMapIfNeed(m.deps.ConfigMapLister, tc.BaseTiKVSpec().ConfigUpdateStrategy(), inUseName, newCm)
+	if err != nil {
+		return nil, err
+	}
+	return m.deps.TypedControl.CreateOrUpdateConfigMap(tc, newCm)
 }
 
 func getNewServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) *corev1.Service {
@@ -275,13 +272,19 @@ func getNewServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) 
 	tcName := tc.Name
 	instanceName := tc.GetInstanceName()
 	svcName := svcConfig.MemberName(tcName)
-	svcLabel := svcConfig.SvcLabel(label.New().Instance(instanceName)).Labels()
+	svcSelector := svcConfig.SvcLabel(label.New().Instance(instanceName))
+	svcLabel := svcSelector.Copy()
+	if svcConfig.Headless {
+		svcLabel = svcLabel.UsedByPeer()
+	} else {
+		svcLabel = svcLabel.UsedByEndUser()
+	}
 
 	svc := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            svcName,
 			Namespace:       ns,
-			Labels:          svcLabel,
+			Labels:          svcLabel.Labels(),
 			OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
 		},
 		Spec: corev1.ServiceSpec{
@@ -293,7 +296,7 @@ func getNewServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) 
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
-			Selector:                 svcLabel,
+			Selector:                 svcSelector.Labels(),
 			PublishNotReadyAddresses: true,
 		},
 	}
@@ -318,7 +321,7 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 	annMount, annVolume := annotationsMountVolume()
 	volMounts := []corev1.VolumeMount{
 		annMount,
-		{Name: v1alpha1.TiKVMemberType.String(), MountPath: "/var/lib/tikv"},
+		{Name: v1alpha1.TiKVMemberType.String(), MountPath: tikvDataVolumeMountPath},
 		{Name: "config", ReadOnly: true, MountPath: "/etc/tikv"},
 		{Name: "startup-script", ReadOnly: true, MountPath: "/usr/local/bin"},
 	}
@@ -326,6 +329,11 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 		volMounts = append(volMounts, corev1.VolumeMount{
 			Name: "tikv-tls", ReadOnly: true, MountPath: "/var/lib/tikv-tls",
 		})
+		if tc.Spec.TiKV.MountClusterClientSecret != nil && *tc.Spec.TiKV.MountClusterClientSecret {
+			volMounts = append(volMounts, corev1.VolumeMount{
+				Name: util.ClusterClientVolName, ReadOnly: true, MountPath: util.ClusterClientTLSPath,
+			})
+		}
 	}
 
 	vols := []corev1.Volume{
@@ -355,6 +363,41 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 				},
 			},
 		})
+		if tc.Spec.TiKV.MountClusterClientSecret != nil && *tc.Spec.TiKV.MountClusterClientSecret {
+			vols = append(vols, corev1.Volume{
+				Name: util.ClusterClientVolName, VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: util.ClusterClientTLSSecretName(tc.Name),
+					},
+				},
+			})
+		}
+	}
+
+	var additionalVolumeClaims []corev1.PersistentVolumeClaim
+	if len(tc.Spec.TiKV.StorageVolumes) > 0 {
+		for _, storageVolume := range tc.Spec.TiKV.StorageVolumes {
+			quantity, err := resource.ParseQuantity(storageVolume.StorageSize)
+			if err != nil {
+				klog.Errorf("Cannot parse storage size %v in Spec.TiKV.StorageVolumes, tidbcluster %s/%s, error: %v", storageVolume.StorageSize, tc.Namespace, tc.Name, err)
+				continue
+			}
+			storageRequest := corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: quantity,
+				},
+			}
+			var storageClassName *string
+			if storageVolume.StorageClassName != nil && len(*storageVolume.StorageClassName) > 0 {
+				storageClassName = storageVolume.StorageClassName
+			} else {
+				storageClassName = tc.Spec.TiKV.StorageClassName
+			}
+			additionalVolumeClaims = append(additionalVolumeClaims, volumeClaimTemplate(storageRequest, fmt.Sprintf("%s-%s", v1alpha1.TiKVMemberType.String(), storageVolume.Name), storageClassName))
+			volMounts = append(volMounts, corev1.VolumeMount{
+				Name: fmt.Sprintf("%s-%s", v1alpha1.TiKVMemberType.String(), storageVolume.Name), MountPath: storageVolume.MountPath,
+			})
+		}
 	}
 
 	sysctls := "sysctl -w"
@@ -378,6 +421,12 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: &privileged,
 					},
+					// Init container resourceRequirements should be equal to app container.
+					// Scheduling is done based on effective requests/limits,
+					// which means init containers can reserve resources for
+					// initialization that are not used during the life of the Pod.
+					// ref:https://kubernetes.io/docs/concepts/workloads/pods/init-containers/#resources
+					Resources: controller.ContainerResource(tc.Spec.TiKV.ResourceRequirements),
 				})
 			}
 		}
@@ -459,11 +508,24 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 		})
 	}
 	tikvContainer.Env = util.AppendEnv(env, baseTiKVSpec.Env())
-	podSpec.Volumes = vols
+	podSpec.Volumes = append(vols, baseTiKVSpec.AdditionalVolumes()...)
 	podSpec.SecurityContext = podSecurityContext
 	podSpec.InitContainers = initContainers
-	podSpec.Containers = []corev1.Container{tikvContainer}
+	podSpec.Containers = append([]corev1.Container{tikvContainer}, baseTiKVSpec.AdditionalContainers()...)
 	podSpec.ServiceAccountName = tc.Spec.TiKV.ServiceAccount
+	if podSpec.ServiceAccountName == "" {
+		podSpec.ServiceAccountName = tc.Spec.ServiceAccount
+	}
+
+	updateStrategy := apps.StatefulSetUpdateStrategy{}
+	if baseTiKVSpec.StatefulSetUpdateStrategy() == apps.OnDeleteStatefulSetStrategyType {
+		updateStrategy.Type = apps.OnDeleteStatefulSetStrategyType
+	} else {
+		updateStrategy.Type = apps.RollingUpdateStatefulSetStrategyType
+		updateStrategy.RollingUpdate = &apps.RollingUpdateStatefulSetStrategy{
+			Partition: pointer.Int32Ptr(tc.TiKVStsDesiredReplicas()),
+		}
+	}
 
 	tikvset := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -474,7 +536,7 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 			OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
 		},
 		Spec: apps.StatefulSetSpec{
-			Replicas: controller.Int32Ptr(tc.TiKVStsDesiredReplicas()),
+			Replicas: pointer.Int32Ptr(tc.TiKVStsDesiredReplicas()),
 			Selector: tikvLabel.LabelSelector(),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -488,14 +550,11 @@ func getNewTiKVSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap)
 			},
 			ServiceName:         headlessSvcName,
 			PodManagementPolicy: apps.ParallelPodManagement,
-			UpdateStrategy: apps.StatefulSetUpdateStrategy{
-				Type: apps.RollingUpdateStatefulSetStrategyType,
-				RollingUpdate: &apps.RollingUpdateStatefulSetStrategy{
-					Partition: controller.Int32Ptr(tc.TiKVStsDesiredReplicas()),
-				},
-			},
+			UpdateStrategy:      updateStrategy,
 		},
 	}
+
+	tikvset.Spec.VolumeClaimTemplates = append(tikvset.Spec.VolumeClaimTemplates, additionalVolumeClaims...)
 	return tikvset, nil
 }
 
@@ -521,75 +580,69 @@ func transformTiKVConfigMap(srcStr string, tc *v1alpha1.TidbCluster) string {
 	if config == nil {
 		return srcStr
 	}
-	if config.TiKVPessimisticTxn != nil {
-		if config.TiKVPessimisticTxn.WaitForLockTimeout != nil {
-			_, err := strconv.ParseInt(*config.TiKVPessimisticTxn.WaitForLockTimeout, 10, 64)
+
+	if v := config.Get("pessimistic-txn.wait-for-lock-timeout"); v != nil {
+		if str, err := v.AsString(); err == nil {
+			_, err := strconv.ParseInt(str, 10, 64)
 			if err == nil {
 				waitForLockTimeOutKey := "wait-for-lock-timeout"
-				old := fmt.Sprintf(`%s = "%s"`, waitForLockTimeOutKey, *config.TiKVPessimisticTxn.WaitForLockTimeout)
-				newString := fmt.Sprintf(`%s = %s`, waitForLockTimeOutKey, *config.TiKVPessimisticTxn.WaitForLockTimeout)
+				old := fmt.Sprintf(`%s = "%s"`, waitForLockTimeOutKey, str)
+				newString := fmt.Sprintf(`%s = %s`, waitForLockTimeOutKey, str)
 				srcStr = strings.ReplaceAll(srcStr, old, newString)
 			}
-		}
-		if config.TiKVPessimisticTxn.WakeUpDelayDuration != nil {
-			_, err := strconv.ParseInt(*config.TiKVPessimisticTxn.WakeUpDelayDuration, 10, 64)
-			if err == nil {
-				wakeUpDelayDuration := "wake-up-delay-duration"
-				old := fmt.Sprintf(`%s = "%s"`, wakeUpDelayDuration, *config.TiKVPessimisticTxn.WakeUpDelayDuration)
-				newString := fmt.Sprintf(`%s = %s`, wakeUpDelayDuration, *config.TiKVPessimisticTxn.WakeUpDelayDuration)
-				srcStr = strings.ReplaceAll(srcStr, old, newString)
-			}
+		} else {
+			klog.Warningf("pessimistic-txn.wait-for-lock-timeout is not string type: %v", err)
 		}
 	}
+
+	if v := config.Get("pessimistic-txn.wake-up-delay-duration"); v != nil {
+		if str, err := v.AsString(); err == nil {
+			_, err := strconv.ParseInt(str, 10, 64)
+			if err == nil {
+				wakeUpDelayDuration := "wake-up-delay-duration"
+				old := fmt.Sprintf(`%s = "%s"`, wakeUpDelayDuration, str)
+				newString := fmt.Sprintf(`%s = %s`, wakeUpDelayDuration, str)
+				srcStr = strings.ReplaceAll(srcStr, old, newString)
+			}
+		} else {
+			klog.Warningf("pessimistic-txn.wake-up-delay-duration is not string type: %v", err)
+		}
+	}
+
 	return srcStr
 }
 
 func getTikVConfigMap(tc *v1alpha1.TidbCluster) (*corev1.ConfigMap, error) {
-
 	config := tc.Spec.TiKV.Config
 	if config == nil {
 		return nil, nil
 	}
 
-	// override CA if tls enabled
-	if tc.IsTLSClusterEnabled() {
-		if config.Security == nil {
-			config.Security = &v1alpha1.TiKVSecurityConfig{}
-		}
-		config.Security.CAPath = pointer.StringPtr(path.Join(tikvClusterCertPath, tlsSecretRootCAKey))
-		config.Security.CertPath = pointer.StringPtr(path.Join(tikvClusterCertPath, corev1.TLSCertKey))
-		config.Security.KeyPath = pointer.StringPtr(path.Join(tikvClusterCertPath, corev1.TLSPrivateKeyKey))
+	scriptModel := &TiKVStartScriptModel{
+		EnableAdvertiseStatusAddr: false,
+		DataDir:                   filepath.Join(tikvDataVolumeMountPath, tc.Spec.TiKV.DataSubDir),
+	}
+	if tc.Spec.EnableDynamicConfiguration != nil && *tc.Spec.EnableDynamicConfiguration {
+		scriptModel.AdvertiseStatusAddr = "${POD_NAME}.${HEADLESS_SERVICE_NAME}.${NAMESPACE}.svc"
+		scriptModel.EnableAdvertiseStatusAddr = true
 	}
 
-	confText, err := MarshalTOML(config)
-	if err != nil {
-		return nil, err
+	if tc.IsHeterogeneous() {
+		scriptModel.PDAddress = tc.Scheme() + "://" + controller.PDMemberName(tc.Spec.Cluster.Name) + ":2379"
+	} else {
+		scriptModel.PDAddress = tc.Scheme() + "://${CLUSTER_NAME}-pd:2379"
 	}
-	startScript, err := RenderTiKVStartScript(&TiKVStartScriptModel{
-		Scheme: tc.Scheme(),
-	})
+	cm, err := getTikVConfigMapForTiKVSpec(tc.Spec.TiKV, tc, scriptModel)
 	if err != nil {
 		return nil, err
 	}
 	instanceName := tc.GetInstanceName()
 	tikvLabel := label.New().Instance(instanceName).TiKV().Labels()
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            controller.TiKVMemberName(tc.Name),
-			Namespace:       tc.Namespace,
-			Labels:          tikvLabel,
-			OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
-		},
-		Data: map[string]string{
-			"config-file":    transformTiKVConfigMap(string(confText), tc),
-			"startup-script": startScript,
-		},
-	}
-
-	if tc.BaseTiKVSpec().ConfigUpdateStrategy() == v1alpha1.ConfigUpdateStrategyRollingUpdate {
-		if err := AddConfigMapDigestSuffix(cm); err != nil {
-			return nil, err
-		}
+	cm.ObjectMeta = metav1.ObjectMeta{
+		Name:            controller.TiKVMemberName(tc.Name),
+		Namespace:       tc.Namespace,
+		Labels:          tikvLabel,
+		OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
 	}
 
 	return cm, nil
@@ -600,17 +653,20 @@ func labelTiKV(tc *v1alpha1.TidbCluster) label.Label {
 	return label.New().Instance(instanceName).TiKV()
 }
 
-func (tkmm *tikvMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *apps.StatefulSet) error {
+func (m *tikvMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *apps.StatefulSet) error {
 	if set == nil {
 		// skip if not created yet
 		return nil
 	}
 	tc.Status.TiKV.StatefulSet = &set.Status
-	upgrading, err := tkmm.tikvStatefulSetIsUpgradingFn(tkmm.podLister, tkmm.pdControl, set, tc)
+	upgrading, err := m.statefulSetIsUpgradingFn(m.deps.PodLister, m.deps.PDControl, set, tc)
 	if err != nil {
 		return err
 	}
-	if upgrading && tc.Status.PD.Phase != v1alpha1.UpgradePhase {
+	// Scaling takes precedence over upgrading.
+	if tc.TiKVStsDesiredReplicas() != *set.Spec.Replicas {
+		tc.Status.TiKV.Phase = v1alpha1.ScalePhase
+	} else if upgrading && tc.Status.PD.Phase != v1alpha1.UpgradePhase {
 		tc.Status.TiKV.Phase = v1alpha1.UpgradePhase
 	} else {
 		tc.Status.TiKV.Phase = v1alpha1.NormalPhase
@@ -620,7 +676,7 @@ func (tkmm *tikvMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, s
 	stores := map[string]v1alpha1.TiKVStore{}
 	tombstoneStores := map[string]v1alpha1.TiKVStore{}
 
-	pdCli := controller.GetPDClient(tkmm.pdControl, tc)
+	pdCli := controller.GetPDClient(m.deps.PDControl, tc)
 	// This only returns Up/Down/Offline stores
 	storesInfo, err := pdCli.GetStores()
 	if err != nil {
@@ -638,7 +694,7 @@ func (tkmm *tikvMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, s
 		if store.Store != nil && !pattern.Match([]byte(store.Store.Address)) {
 			continue
 		}
-		status := tkmm.getTiKVStore(store)
+		status := m.getTiKVStore(store)
 		if status == nil {
 			continue
 		}
@@ -670,7 +726,7 @@ func (tkmm *tikvMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, s
 		if store.Store != nil && !pattern.Match([]byte(store.Store.Address)) {
 			continue
 		}
-		status := tkmm.getTiKVStore(store)
+		status := m.getTiKVStore(store)
 		if status == nil {
 			continue
 		}
@@ -706,12 +762,12 @@ func (tkmm *tikvMemberManager) getTiKVStore(store *pdapi.StoreInfo) *v1alpha1.Ti
 	}
 }
 
-func (tkmm *tikvMemberManager) setStoreLabelsForTiKV(tc *v1alpha1.TidbCluster) (int, error) {
+func (m *tikvMemberManager) setStoreLabelsForTiKV(tc *v1alpha1.TidbCluster) (int, error) {
 	ns := tc.GetNamespace()
 	// for unit test
 	setCount := 0
 
-	pdCli := controller.GetPDClient(tkmm.pdControl, tc)
+	pdCli := controller.GetPDClient(m.deps.PDControl, tc)
 	storesInfo, err := pdCli.GetStores()
 	if err != nil {
 		return setCount, err
@@ -737,28 +793,30 @@ func (tkmm *tikvMemberManager) setStoreLabelsForTiKV(tc *v1alpha1.TidbCluster) (
 		if store.Store != nil && !pattern.Match([]byte(store.Store.Address)) {
 			continue
 		}
-		status := tkmm.getTiKVStore(store)
+		status := m.getTiKVStore(store)
 		if status == nil {
 			continue
 		}
 		podName := status.PodName
 
-		pod, err := tkmm.podLister.Pods(ns).Get(podName)
+		pod, err := m.deps.PodLister.Pods(ns).Get(podName)
 		if err != nil {
-			return setCount, err
+			return setCount, fmt.Errorf("setStoreLabelsForTiKV: failed to get pods %s for cluster %s/%s, error: %s", podName, ns, tc.GetName(), err)
 		}
 
 		nodeName := pod.Spec.NodeName
-		ls, err := tkmm.getNodeLabels(nodeName, locationLabels)
+		ls, err := m.getNodeLabels(nodeName, locationLabels)
 		if err != nil || len(ls) == 0 {
 			klog.Warningf("node: [%s] has no node labels, skipping set store labels for Pod: [%s/%s]", nodeName, ns, podName)
 			continue
 		}
 
-		if !tkmm.storeLabelsEqualNodeLabels(store.Store.Labels, ls) {
+		if !m.storeLabelsEqualNodeLabels(store.Store.Labels, ls) {
 			set, err := pdCli.SetStoreLabels(store.Store.Id, ls)
 			if err != nil {
-				klog.Warningf("failed to set pod: [%s/%s]'s store labels: %v", ns, podName, ls)
+				msg := fmt.Sprintf("failed to set labels %v for store (id: %d, pod: %s/%s): %v ",
+					ls, store.Store.Id, ns, podName, err)
+				m.deps.Recorder.Event(tc, corev1.EventTypeWarning, FailedSetStoreLabels, msg)
 				continue
 			}
 			if set {
@@ -771,8 +829,8 @@ func (tkmm *tikvMemberManager) setStoreLabelsForTiKV(tc *v1alpha1.TidbCluster) (
 	return setCount, nil
 }
 
-func (tkmm *tikvMemberManager) getNodeLabels(nodeName string, storeLabels []string) (map[string]string, error) {
-	node, err := tkmm.nodeLister.Get(nodeName)
+func (m *tikvMemberManager) getNodeLabels(nodeName string, storeLabels []string) (map[string]string, error) {
+	node, err := m.deps.NodeLister.Get(nodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -797,7 +855,7 @@ func (tkmm *tikvMemberManager) getNodeLabels(nodeName string, storeLabels []stri
 
 // storeLabelsEqualNodeLabels compares store labels with node labels
 // for historic reasons, PD stores TiKV labels as []*StoreLabel which is a key-value pair slice
-func (tkmm *tikvMemberManager) storeLabelsEqualNodeLabels(storeLabels []*metapb.StoreLabel, nodeLabels map[string]string) bool {
+func (m *tikvMemberManager) storeLabelsEqualNodeLabels(storeLabels []*metapb.StoreLabel, nodeLabels map[string]string) bool {
 	ls := map[string]string{}
 	for _, label := range storeLabels {
 		key := label.GetKey()
@@ -820,7 +878,7 @@ func tikvStatefulSetIsUpgrading(podLister corelisters.PodLister, pdControl pdapi
 	}
 	tikvPods, err := podLister.Pods(tc.GetNamespace()).List(selector)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("tikvStatefulSetIsUpgrading: failed to get pods for cluster %s/%s, selector %s, error: %s", tc.GetNamespace(), instanceName, selector, err)
 	}
 	for _, pod := range tikvPods {
 		revisionHash, exist := pod.Labels[apps.ControllerRevisionHashLabelKey]
@@ -843,13 +901,13 @@ func NewFakeTiKVMemberManager() *FakeTiKVMemberManager {
 	return &FakeTiKVMemberManager{}
 }
 
-func (ftmm *FakeTiKVMemberManager) SetSyncError(err error) {
-	ftmm.err = err
+func (m *FakeTiKVMemberManager) SetSyncError(err error) {
+	m.err = err
 }
 
-func (ftmm *FakeTiKVMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
-	if ftmm.err != nil {
-		return ftmm.err
+func (m *FakeTiKVMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
+	if m.err != nil {
+		return m.err
 	}
 	if len(tc.Status.TiKV.Stores) != 0 {
 		// simulate status update

@@ -15,19 +15,14 @@ package controller
 
 import (
 	"fmt"
-	"strings"
-
-	"k8s.io/klog"
 
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
-	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
 	informers "github.com/pingcap/tidb-operator/pkg/client/informers/externalversions/pingcap/v1alpha1"
 	listers "github.com/pingcap/tidb-operator/pkg/client/listers/pingcap/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog"
 )
 
 // BackupScheduleStatusUpdaterInterface is an interface used to update the BackupScheduleStatus associated with a BackupSchedule.
@@ -40,24 +35,17 @@ type BackupScheduleStatusUpdaterInterface interface {
 
 // returns a BackupScheduleStatusUpdaterInterface that updates the Status of a BackupSchedule,
 // using the supplied client and bsLister.
-func NewRealBackupScheduleStatusUpdater(
-	cli versioned.Interface,
-	bsLister listers.BackupScheduleLister,
-	recorder record.EventRecorder) BackupScheduleStatusUpdaterInterface {
+func NewRealBackupScheduleStatusUpdater(deps *Dependencies) BackupScheduleStatusUpdaterInterface {
 	return &realBackupScheduleStatusUpdater{
-		cli,
-		bsLister,
-		recorder,
+		deps: deps,
 	}
 }
 
 type realBackupScheduleStatusUpdater struct {
-	cli      versioned.Interface
-	bsLister listers.BackupScheduleLister
-	recorder record.EventRecorder
+	deps *Dependencies
 }
 
-func (bss *realBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(
+func (u *realBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(
 	bs *v1alpha1.BackupSchedule,
 	newStatus *v1alpha1.BackupScheduleStatus,
 	oldStatus *v1alpha1.BackupScheduleStatus) error {
@@ -66,12 +54,12 @@ func (bss *realBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(
 	bsName := bs.GetName()
 	// don't wait due to limited number of clients, but backoff after the default number of steps
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		_, updateErr := bss.cli.PingcapV1alpha1().BackupSchedules(ns).Update(bs)
+		_, updateErr := u.deps.Clientset.PingcapV1alpha1().BackupSchedules(ns).Update(bs)
 		if updateErr == nil {
 			klog.Infof("BackupSchedule: [%s/%s] updated successfully", ns, bsName)
 			return nil
 		}
-		if updated, err := bss.bsLister.BackupSchedules(ns).Get(bsName); err == nil {
+		if updated, err := u.deps.BackupScheduleLister.BackupSchedules(ns).Get(bsName); err == nil {
 			// make a copy so we don't mutate the shared cache
 			bs = updated.DeepCopy()
 			bs.Status = *newStatus
@@ -82,21 +70,6 @@ func (bss *realBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(
 		return updateErr
 	})
 	return err
-}
-
-func (bss *realBackupScheduleStatusUpdater) recordBackupScheduleEvent(verb string, bs *v1alpha1.BackupSchedule, err error) {
-	bsName := bs.GetName()
-	if err == nil {
-		reason := fmt.Sprintf("Successful%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s BackupSchedule %s successful",
-			strings.ToLower(verb), bsName)
-		bss.recorder.Event(bs, corev1.EventTypeNormal, reason, msg)
-	} else {
-		reason := fmt.Sprintf("Failed%s", strings.Title(verb))
-		msg := fmt.Sprintf("%s BackupSchedule %s failed error: %s",
-			strings.ToLower(verb), bsName, err)
-		bss.recorder.Event(bs, corev1.EventTypeWarning, reason, msg)
-	}
 }
 
 var _ BackupScheduleStatusUpdaterInterface = &realBackupScheduleStatusUpdater{}
@@ -118,21 +91,21 @@ func NewFakeBackupScheduleStatusUpdater(bsInformer informers.BackupScheduleInfor
 }
 
 // SetUpdateBackupError sets the error attributes of updateBackupScheduleTracker
-func (fbs *FakeBackupScheduleStatusUpdater) SetUpdateBackupScheduleError(err error, after int) {
-	fbs.updateBsTracker.err = err
-	fbs.updateBsTracker.after = after
-	fbs.updateBsTracker.SetError(err).SetAfter(after)
+func (u *FakeBackupScheduleStatusUpdater) SetUpdateBackupScheduleError(err error, after int) {
+	u.updateBsTracker.err = err
+	u.updateBsTracker.after = after
+	u.updateBsTracker.SetError(err).SetAfter(after)
 }
 
 // UpdateBackupSchedule updates the BackupSchedule
-func (fbs *FakeBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(bs *v1alpha1.BackupSchedule, _ *v1alpha1.BackupScheduleStatus, _ *v1alpha1.BackupScheduleStatus) error {
-	defer fbs.updateBsTracker.Inc()
-	if fbs.updateBsTracker.ErrorReady() {
-		defer fbs.updateBsTracker.Reset()
-		return fbs.updateBsTracker.GetError()
+func (u *FakeBackupScheduleStatusUpdater) UpdateBackupScheduleStatus(bs *v1alpha1.BackupSchedule, _ *v1alpha1.BackupScheduleStatus, _ *v1alpha1.BackupScheduleStatus) error {
+	defer u.updateBsTracker.Inc()
+	if u.updateBsTracker.ErrorReady() {
+		defer u.updateBsTracker.Reset()
+		return u.updateBsTracker.GetError()
 	}
 
-	return fbs.BsIndexer.Update(bs)
+	return u.BsIndexer.Update(bs)
 }
 
 var _ BackupScheduleStatusUpdaterInterface = &FakeBackupScheduleStatusUpdater{}

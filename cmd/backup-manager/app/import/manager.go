@@ -91,8 +91,8 @@ func (rm *RestoreManager) ProcessRestore() error {
 	var db *sql.DB
 	var dsn string
 	err = wait.PollImmediate(constants.PollInterval, constants.CheckTimeout, func() (done bool, err error) {
-		// TLS is not currently supported
-		dsn, err = rm.GetDSN(false)
+		// TODO: for local backend mode, lightning will use both pd and mysql client. We should set both tls configurations in that mode
+		dsn, err = rm.GetDSN(rm.TLSClient)
 		if err != nil {
 			klog.Errorf("can't get dsn of tidb cluster %s, err: %s", rm, err)
 			return false, err
@@ -167,6 +167,21 @@ func (rm *RestoreManager) performRestore(restore *v1alpha1.Restore) error {
 	}
 	klog.Infof("unarchive cluster %s backup %s data success", rm, restoreDataPath)
 
+	commitTs, err := util.GetCommitTsFromMetadata(unarchiveDataPath)
+	if err != nil {
+		errs = append(errs, err)
+		klog.Errorf("get cluster %s commitTs failed, err: %s", rm, err)
+		uerr := rm.StatusUpdater.Update(restore, &v1alpha1.RestoreCondition{
+			Type:    v1alpha1.RestoreFailed,
+			Status:  corev1.ConditionTrue,
+			Reason:  "GetCommitTsFailed",
+			Message: err.Error(),
+		})
+		errs = append(errs, uerr)
+		return errorutils.NewAggregate(errs)
+	}
+	klog.Infof("get cluster %s commitTs %s success", rm, commitTs)
+
 	err = rm.loadTidbClusterData(unarchiveDataPath)
 	if err != nil {
 		errs = append(errs, err)
@@ -186,6 +201,7 @@ func (rm *RestoreManager) performRestore(restore *v1alpha1.Restore) error {
 
 	restore.Status.TimeStarted = metav1.Time{Time: started}
 	restore.Status.TimeCompleted = metav1.Time{Time: finish}
+	restore.Status.CommitTs = commitTs
 
 	return rm.StatusUpdater.Update(restore, &v1alpha1.RestoreCondition{
 		Type:   v1alpha1.RestoreComplete,

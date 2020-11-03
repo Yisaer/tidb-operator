@@ -16,7 +16,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
@@ -51,28 +50,6 @@ var (
 
 	// tidbMonitorControllerkind cotnains the schema.GroupVersionKind for TidbMonitor controller type.
 	tidbMonitorControllerkind = v1alpha1.SchemeGroupVersion.WithKind("TidbMonitor")
-
-	// TidbBackupManagerImage is the image of tidb backup manager tool
-	TidbBackupManagerImage string
-
-	// ClusterScoped controls whether operator should manage kubernetes cluster wide TiDB clusters
-	ClusterScoped bool
-
-	// TestMode defines whether tidb operator run in test mode, test mode is only open when test
-	TestMode bool
-	// ResyncDuration is the resync time of informer
-	ResyncDuration time.Duration
-
-	// TidbDiscoveryImage is the image of tidb discovery service
-	TidbDiscoveryImage string
-
-	// PodWebhookEnabled is the key to indicate whether pod admission webhook is set up.
-	PodWebhookEnabled bool
-)
-
-const (
-	// defaultTiDBSlowLogImage is default image of tidb log tailer
-	defaultTiDBLogTailerImage = "busybox:1.26.2"
 )
 
 // RequeueError is used to requeue the item, this error type should't be considered as a real error
@@ -367,11 +344,6 @@ func setIfNotEmpty(container map[string]string, key, value string) {
 	if value != "" {
 		container[key] = value
 	}
-}
-
-// Int32Ptr returns a pointer to an int32
-func Int32Ptr(i int32) *int32 {
-	return &i
 }
 
 // RequestTracker is used by unit test for mocking request error

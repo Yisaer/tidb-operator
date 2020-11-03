@@ -15,13 +15,16 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/tidb-operator/pkg/client/clientset/versioned"
 	"github.com/pingcap/tidb-operator/pkg/discovery/server"
+	"github.com/pingcap/tidb-operator/pkg/pdapi"
 	"github.com/pingcap/tidb-operator/pkg/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -33,12 +36,14 @@ import (
 var (
 	printVersion bool
 	port         int
+	proxyPort    int
 )
 
 func init() {
 	flag.BoolVar(&printVersion, "V", false, "Show version and quit")
 	flag.BoolVar(&printVersion, "version", false, "Show version and quit")
 	flag.IntVar(&port, "port", 10261, "The port that the tidb discovery's http service runs on (default 10261)")
+	flag.IntVar(&proxyPort, "proxy-port", 10262, "The port that the tidb discovery's proxy service runs on (default 10262)")
 	flag.Parse()
 }
 
@@ -69,8 +74,28 @@ func main() {
 		klog.Fatalf("failed to get kubernetes Clientset: %v", err)
 	}
 
+	tcName := os.Getenv("TC_NAME")
+	if len(tcName) < 1 {
+		klog.Fatal("ENV TC_NAME is not set")
+	}
+	tcTls := false
+	tlsEnabled := os.Getenv("TC_TLS_ENABLED")
+	if tlsEnabled == strconv.FormatBool(true) {
+		tcTls = true
+	}
+
 	go wait.Forever(func() {
-		server.StartServer(cli, kubeCli, port)
+		addr := fmt.Sprintf("0.0.0.0:%d", port)
+		klog.Infof("starting TiDB Discovery server, listening on %s", addr)
+		discoveryServer := server.NewServer(pdapi.NewDefaultPDControl(kubeCli), cli, kubeCli)
+		discoveryServer.ListenAndServe(addr)
 	}, 5*time.Second)
+	go wait.Forever(func() {
+		addr := fmt.Sprintf("0.0.0.0:%d", proxyPort)
+		klog.Infof("starting TiDB Proxy server, listening on %s", addr)
+		proxyServer := server.NewProxyServer(tcName, tcTls)
+		proxyServer.ListenAndServe(addr)
+	}, 5*time.Second)
+
 	klog.Fatal(http.ListenAndServe(":6060", nil))
 }

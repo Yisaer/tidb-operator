@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	TiDBV3Version                 = "v3.0.8"
-	TiDBV3UpgradeVersion          = "v3.0.9"
-	TiDBV4Version                 = "v4.0.0-rc.2"
-	TiDBV4UpgradeVersion          = "v4.0.0"
+	TiDBV3Version                 = "v3.1.1"
+	TiDBV3UpgradeVersion          = "v3.1.2"
+	TiDBV4Version                 = "v4.0.4"
+	TiDBV4UpgradeVersion          = "v4.0.5"
 	PrometheusImage               = "prom/prometheus"
 	PrometheusVersion             = "v2.18.1"
 	TiDBMonitorReloaderImage      = "pingcap/tidb-monitor-reloader"
@@ -38,7 +38,7 @@ const (
 	TiDBMonitorInitializerImage   = "pingcap/tidb-monitor-initializer"
 	TiDBMonitorInitializerVersion = "v3.0.8"
 	GrafanaImage                  = "grafana/grafana"
-	GrafanaVersion                = "6.0.1"
+	GrafanaVersion                = "6.1.6"
 )
 
 func ListImages() []string {

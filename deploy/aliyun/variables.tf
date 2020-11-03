@@ -10,7 +10,7 @@ variable "bastion_cpu_core_count" {
 
 variable "operator_version" {
   type    = string
-  default = "v1.1.0"
+  default = "v1.1.6"
 }
 
 variable "operator_helm_values" {
@@ -36,7 +36,7 @@ variable "cluster_name" {
 
 variable "tidb_version" {
   description = "TiDB cluster version"
-  default     = "v3.0.13"
+  default     = "v4.0.7"
 }
 variable "tidb_cluster_chart_version" {
   description = "tidb-cluster chart version"
@@ -89,7 +89,7 @@ variable "vpc_id" {
 }
 
 variable "group_id" {
-  description = "Security group id, specify this variable to use and exising security group"
+  description = "Security group id, specify this variable to use and existing security group"
   default     = ""
 }
 

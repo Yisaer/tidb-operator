@@ -26,9 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	kubeinformers "k8s.io/client-go/informers"
 	podinformers "k8s.io/client-go/informers/core/v1"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/pointer"
 )
 
@@ -80,7 +78,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 		}
 		SetStatefulSetLastAppliedConfigAnnotation(oldSet)
 
-		newSet.Spec.UpdateStrategy.RollingUpdate.Partition = controller.Int32Ptr(3)
+		newSet.Spec.UpdateStrategy.RollingUpdate.Partition = pointer.Int32Ptr(3)
 
 		err := upgrader.Upgrade(tc, oldSet, newSet)
 		test.errExpectFn(g, err)
@@ -101,7 +99,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(1)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(1)))
 			},
 		},
 		{
@@ -159,7 +157,26 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(3)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(3)))
+			},
+		},
+		{
+			name: "pd scaling",
+			changeFn: func(tc *v1alpha1.TidbCluster) {
+				tc.Status.PD.Synced = true
+				tc.Status.PD.Phase = v1alpha1.ScalePhase
+			},
+			changePods: nil,
+			changeOldSet: func(set *apps.StatefulSet) {
+				set.Spec.Template.Spec.Containers[0].Image = "pd-test-image:old"
+			},
+			transferLeaderErr: false,
+			errExpectFn: func(g *GomegaWithT, err error) {
+				g.Expect(err).NotTo(HaveOccurred())
+			},
+			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
+				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.ScalePhase))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(3)))
 			},
 		},
 		{
@@ -175,7 +192,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(3)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(3)))
 			},
 		},
 		{
@@ -191,7 +208,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(2)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(2)))
 			},
 		},
 		{
@@ -207,7 +224,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(2)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(2)))
 			},
 		},
 		{
@@ -222,7 +239,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.NormalPhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(3)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(3)))
 			},
 		},
 		{
@@ -238,7 +255,7 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 			},
 			expectFn: func(g *GomegaWithT, tc *v1alpha1.TidbCluster, newSet *apps.StatefulSet) {
 				g.Expect(tc.Status.PD.Phase).To(Equal(v1alpha1.UpgradePhase))
-				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(controller.Int32Ptr(2)))
+				g.Expect(newSet.Spec.UpdateStrategy.RollingUpdate.Partition).To(Equal(pointer.Int32Ptr(2)))
 			},
 		},
 	}
@@ -250,15 +267,12 @@ func TestPDUpgraderUpgrade(t *testing.T) {
 }
 
 func newPDUpgrader() (Upgrader, *pdapi.FakePDControl, *controller.FakePodControl, podinformers.PodInformer) {
-	kubeCli := kubefake.NewSimpleClientset()
-	podInformer := kubeinformers.NewSharedInformerFactory(kubeCli, 0).Core().V1().Pods()
-	pdControl := pdapi.NewFakePDControl(kubeCli)
-	podControl := controller.NewFakePodControl(podInformer)
-	return &pdUpgrader{
-			pdControl:  pdControl,
-			podControl: podControl,
-			podLister:  podInformer.Lister()},
-		pdControl, podControl, podInformer
+	fakeDeps := controller.NewFakeDependencies()
+	pdUpgrader := &pdUpgrader{deps: fakeDeps}
+	pdControl := fakeDeps.PDControl.(*pdapi.FakePDControl)
+	podControl := fakeDeps.PodControl.(*controller.FakePodControl)
+	podInformer := fakeDeps.KubeInformerFactory.Core().V1().Pods()
+	return pdUpgrader, pdControl, podControl, podInformer
 }
 
 func newStatefulSetForPDUpgrader() *apps.StatefulSet {
@@ -268,7 +282,7 @@ func newStatefulSetForPDUpgrader() *apps.StatefulSet {
 			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: apps.StatefulSetSpec{
-			Replicas: controller.Int32Ptr(3),
+			Replicas: pointer.Int32Ptr(3),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -281,7 +295,7 @@ func newStatefulSetForPDUpgrader() *apps.StatefulSet {
 			},
 			UpdateStrategy: apps.StatefulSetUpdateStrategy{
 				Type:          apps.RollingUpdateStatefulSetStrategyType,
-				RollingUpdate: &apps.RollingUpdateStatefulSetStrategy{Partition: controller.Int32Ptr(2)},
+				RollingUpdate: &apps.RollingUpdateStatefulSetStrategy{Partition: pointer.Int32Ptr(2)},
 			},
 		},
 		Status: apps.StatefulSetStatus{
@@ -311,7 +325,7 @@ func newTidbClusterForPDUpgrader() *v1alpha1.TidbCluster {
 			Labels:    label.New().Instance(upgradeInstanceName),
 		},
 		Spec: v1alpha1.TidbClusterSpec{
-			PD: v1alpha1.PDSpec{
+			PD: &v1alpha1.PDSpec{
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Image: "pd-test-image",
 				},

@@ -14,8 +14,6 @@
 package controller
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -23,11 +21,8 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
-	"github.com/pingcap/tidb-operator/pkg/httputil"
-	"github.com/pingcap/tidb-operator/pkg/util"
+	httputil "github.com/pingcap/tidb-operator/pkg/util/http"
 	"github.com/pingcap/tidb/config"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -54,35 +49,35 @@ type TiDBControlInterface interface {
 
 // defaultTiDBControl is default implementation of TiDBControlInterface.
 type defaultTiDBControl struct {
-	kubeCli kubernetes.Interface
+	httpClient
 	// for unit test only
 	testURL string
 }
 
 // NewDefaultTiDBControl returns a defaultTiDBControl instance
 func NewDefaultTiDBControl(kubeCli kubernetes.Interface) *defaultTiDBControl {
-	return &defaultTiDBControl{kubeCli: kubeCli}
+	return &defaultTiDBControl{httpClient: httpClient{kubeCli: kubeCli}}
 }
 
-func (tdc *defaultTiDBControl) GetHealth(tc *v1alpha1.TidbCluster, ordinal int32) (bool, error) {
-	httpClient, err := tdc.getHTTPClient(tc)
+func (c *defaultTiDBControl) GetHealth(tc *v1alpha1.TidbCluster, ordinal int32) (bool, error) {
+	httpClient, err := c.getHTTPClient(tc)
 	if err != nil {
 		return false, err
 	}
 
-	baseURL := tdc.getBaseURL(tc, ordinal)
+	baseURL := c.getBaseURL(tc, ordinal)
 	url := fmt.Sprintf("%s/status", baseURL)
 	_, err = getBodyOK(httpClient, url)
 	return err == nil, nil
 }
 
-func (tdc *defaultTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) (*DBInfo, error) {
-	httpClient, err := tdc.getHTTPClient(tc)
+func (c *defaultTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) (*DBInfo, error) {
+	httpClient, err := c.getHTTPClient(tc)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := tdc.getBaseURL(tc, ordinal)
+	baseURL := c.getBaseURL(tc, ordinal)
 	url := fmt.Sprintf("%s/info", baseURL)
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
@@ -93,13 +88,13 @@ func (tdc *defaultTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) 
 		return nil, err
 	}
 	defer httputil.DeferClose(res.Body)
-	if res.StatusCode != http.StatusOK {
-		errMsg := fmt.Errorf(fmt.Sprintf("Error response %v URL: %s", res.StatusCode, url))
-		return nil, errMsg
-	}
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		errMsg := fmt.Errorf(fmt.Sprintf("Error response %s:%v URL: %s", string(body), res.StatusCode, url))
+		return nil, errMsg
 	}
 	info := DBInfo{}
 	err = json.Unmarshal(body, &info)
@@ -109,13 +104,13 @@ func (tdc *defaultTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) 
 	return &info, nil
 }
 
-func (tdc *defaultTiDBControl) GetSettings(tc *v1alpha1.TidbCluster, ordinal int32) (*config.Config, error) {
-	httpClient, err := tdc.getHTTPClient(tc)
+func (c *defaultTiDBControl) GetSettings(tc *v1alpha1.TidbCluster, ordinal int32) (*config.Config, error) {
+	httpClient, err := c.getHTTPClient(tc)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := tdc.getBaseURL(tc, ordinal)
+	baseURL := c.getBaseURL(tc, ordinal)
 	url := fmt.Sprintf("%s/settings", baseURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -126,13 +121,13 @@ func (tdc *defaultTiDBControl) GetSettings(tc *v1alpha1.TidbCluster, ordinal int
 		return nil, err
 	}
 	defer httputil.DeferClose(res.Body)
-	if res.StatusCode != http.StatusOK {
-		errMsg := fmt.Errorf(fmt.Sprintf("Error response %v URL: %s", res.StatusCode, url))
-		return nil, errMsg
-	}
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		errMsg := fmt.Errorf(fmt.Sprintf("Error response %s:%v URL: %s", string(body), res.StatusCode, url))
+		return nil, errMsg
 	}
 	info := config.Config{}
 	err = json.Unmarshal(body, &info)
@@ -147,58 +142,22 @@ func getBodyOK(httpClient *http.Client, apiURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode >= 400 {
-		errMsg := fmt.Errorf(fmt.Sprintf("Error response %v URL %s", res.StatusCode, apiURL))
-		return nil, errMsg
-	}
-
 	defer httputil.DeferClose(res.Body)
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
+	if res.StatusCode >= 400 {
+		errMsg := fmt.Errorf(fmt.Sprintf("Error response %s:%v URL %s", string(body), res.StatusCode, apiURL))
+		return nil, errMsg
+	}
+
 	return body, err
 }
 
-func (tdc *defaultTiDBControl) getHTTPClient(tc *v1alpha1.TidbCluster) (*http.Client, error) {
-	httpClient := &http.Client{Timeout: timeout}
-	if !tc.IsTLSClusterEnabled() {
-		return httpClient, nil
-	}
-
-	tcName := tc.Name
-	ns := tc.Namespace
-	secretName := util.ClusterClientTLSSecretName(tcName)
-	secret, err := tdc.kubeCli.CoreV1().Secrets(ns).Get(secretName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	clientCert, certExists := secret.Data[v1.TLSCertKey]
-	clientKey, keyExists := secret.Data[v1.TLSPrivateKeyKey]
-	if !certExists || !keyExists {
-		return nil, fmt.Errorf("cert or key does not exist in secret %s/%s", ns, secretName)
-	}
-
-	tlsCert, err := tls.X509KeyPair(clientCert, clientKey)
-	if err != nil {
-		return nil, fmt.Errorf("unable to load certificates from secret %s/%s: %v", ns, secretName, err)
-	}
-
-	rootCAs := x509.NewCertPool()
-	rootCAs.AppendCertsFromPEM(secret.Data[v1.ServiceAccountRootCAKey])
-	config := &tls.Config{
-		RootCAs:      rootCAs,
-		Certificates: []tls.Certificate{tlsCert},
-	}
-	httpClient.Transport = &http.Transport{TLSClientConfig: config}
-
-	return httpClient, nil
-}
-
-func (tdc *defaultTiDBControl) getBaseURL(tc *v1alpha1.TidbCluster, ordinal int32) string {
-	if tdc.testURL != "" {
-		return tdc.testURL
+func (c *defaultTiDBControl) getBaseURL(tc *v1alpha1.TidbCluster, ordinal int32) string {
+	if c.testURL != "" {
+		return c.testURL
 	}
 
 	tcName := tc.GetName()
@@ -223,25 +182,25 @@ func NewFakeTiDBControl() *FakeTiDBControl {
 }
 
 // SetHealth set health info for FakeTiDBControl
-func (ftd *FakeTiDBControl) SetHealth(healthInfo map[string]bool) {
-	ftd.healthInfo = healthInfo
+func (c *FakeTiDBControl) SetHealth(healthInfo map[string]bool) {
+	c.healthInfo = healthInfo
 }
 
-func (ftd *FakeTiDBControl) GetHealth(tc *v1alpha1.TidbCluster, ordinal int32) (bool, error) {
+func (c *FakeTiDBControl) GetHealth(tc *v1alpha1.TidbCluster, ordinal int32) (bool, error) {
 	podName := fmt.Sprintf("%s-%d", TiDBMemberName(tc.GetName()), ordinal)
-	if ftd.healthInfo == nil {
+	if c.healthInfo == nil {
 		return false, nil
 	}
-	if health, ok := ftd.healthInfo[podName]; ok {
+	if health, ok := c.healthInfo[podName]; ok {
 		return health, nil
 	}
 	return false, nil
 }
 
-func (ftd *FakeTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) (*DBInfo, error) {
-	return ftd.tiDBInfo, ftd.getInfoError
+func (c *FakeTiDBControl) GetInfo(tc *v1alpha1.TidbCluster, ordinal int32) (*DBInfo, error) {
+	return c.tiDBInfo, c.getInfoError
 }
 
-func (ftd *FakeTiDBControl) GetSettings(tc *v1alpha1.TidbCluster, ordinal int32) (*config.Config, error) {
-	return ftd.tidbConfig, ftd.getInfoError
+func (c *FakeTiDBControl) GetSettings(tc *v1alpha1.TidbCluster, ordinal int32) (*config.Config, error) {
+	return c.tidbConfig, c.getInfoError
 }

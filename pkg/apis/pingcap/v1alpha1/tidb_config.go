@@ -57,6 +57,9 @@ type TiDBConfig struct {
 	// Optional: Defaults to log
 	// +optional
 	OOMAction *string `toml:"oom-action,omitempty" json:"oom-action,omitempty"`
+	// Optional: Defaults to 3072
+	// +optional
+	MaxIndexLength *int64 `toml:"max-index-length,omitempty" json:"max-index-length,omitempty"`
 	// Optional: Defaults to 34359738368
 	// +optional
 	MemQuotaQuery *int64 `toml:"mem-quota-query,omitempty" json:"mem-quota-query,omitempty"`
@@ -70,6 +73,7 @@ type TiDBConfig struct {
 	// Optional: Defaults to false
 	// +optional
 	EnableBatchDML *bool `toml:"enable-batch-dml,omitempty" json:"enable-batch-dml,omitempty"`
+	// Deprecated in v4.0.0
 	// +optional
 	TxnLocalLatches *TxnLocalLatches `toml:"txn-local-latches,omitempty" json:"txn-local-latches,omitempty"`
 	// +optional
@@ -134,11 +138,25 @@ type TiDBConfig struct {
 	// +optional
 	EnableDynamicConfig *bool `toml:"enable-dynamic-config,omitempty" json:"enable-dynamic-config,omitempty"`
 	// imported from v3.1.0
-	// optional
+	// +optional
 	EnableTableLock *bool `toml:"enable-table-lock,omitempty" json:"enable-table-lock,omitempty"`
 	// imported from v3.1.0
-	// optional
+	// +optional
 	DelayCleanTableLock *uint64 `toml:"delay-clean-table-lock,omitempty" json:"delay-clean-table-lock,omitempty"`
+	// imported from v4.0.5
+	// SkipRegisterToDashboard tells TiDB don't register itself to the dashboard.
+	// +optional
+	SkipRegisterToDashboard *bool `toml:"skip-register-to-dashboard,omitempty" json:"skip-register-to-dashboard,omitempty"`
+	// When enabled, usage data (for example, instance versions) will be reported to PingCAP periodically for user experience analytics.
+	// If this config is set to `false` on all TiDB servers, telemetry will be always disabled regardless of the value of the global variable `tidb_enable_telemetry`.
+	// See PingCAP privacy policy for details: https://pingcap.com/en/privacy-policy/.
+	// Imported from v4.0.2.
+	// Optional: Defaults to true
+	// +optional
+	EnableTelemetry *bool `toml:"enable-telemetry,omitempty" json:"enable-telemetry,omitempty"`
+	// Labels are labels for TiDB server
+	// +optional
+	Labels map[string]string `toml:"labels,omitempty" json:"labels,omitempty"`
 }
 
 // Log is the log section of config.
@@ -152,6 +170,7 @@ type Log struct {
 	// Optional: Defaults to text
 	// +optional
 	Format *string `toml:"format,omitempty" json:"format,omitempty"`
+	// Deprecated in v3.0.5. Use EnableTimestamp instead
 	// Disable automatic timestamps in output.
 	// +optional
 	DisableTimestamp *bool `toml:"disable-timestamp,omitempty" json:"disable-timestamp,omitempty"`
@@ -239,7 +258,7 @@ type Performance struct {
 	// Optional: Defaults to 0.05
 	// +optional
 	FeedbackProbability *float64 `toml:"feedback-probability,omitempty" json:"feedback-probability,omitempty"`
-	// Optional: Defaults to 1024
+	// Optional: Defaults to 512
 	// +optional
 	QueryFeedbackLimit *uint `toml:"query-feedback-limit,omitempty" json:"query-feedback-limit,omitempty"`
 	// Optional: Defaults to 0.8
@@ -269,6 +288,7 @@ type Performance struct {
 	CommitterConcurrency *int `toml:"committer-concurrency,omitempty" json:"committer-concurrency,omitempty"`
 	// +optional
 	MaxTxnTTL *uint64 `toml:"max-txn-ttl,omitempty" json:"max-txn-ttl,omitempty"`
+	// Deprecated in v4.0.0
 	// Optional: Defaults to 300000
 	// +optional
 	TxnEntryCountLimit *uint64 `toml:"txn-entry-count-limit,omitempty" json:"txn-entry-count-limit,omitempty"`
@@ -387,6 +407,7 @@ type TiKVClient struct {
 	// Optional: Defaults to 41s
 	// +optional
 	CommitTimeout *string `toml:"commit-timeout,omitempty" json:"commit-timeout,omitempty"`
+	// Deprecated in v4.0.0
 	// MaxTxnTimeUse is the max time a Txn may use (in seconds) from its startTS to commitTS.
 	// Optional: Defaults to 590
 	// +optional
@@ -523,7 +544,8 @@ type IsolationRead struct {
 // +k8s:openapi-gen=true
 type Experimental struct {
 	// Whether enable the syntax like `auto_random(3)` on the primary key column.
-	// imported from TiDB v3.1.0
+	// Imported from TiDB v3.1.0.
+	// Deprecated in TiDB v4.0.3, please check detail in https://docs.pingcap.com/tidb/dev/release-4.0.3#improvements.
 	// +optional
 	AllowAutoRandom *bool `toml:"allow-auto-random,omitempty" json:"allow-auto-random,omitempty"`
 	// Whether enable creating expression index.

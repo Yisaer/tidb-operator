@@ -18,10 +18,12 @@ import "github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 const (
 	unHealthEventReason     = "Unhealthy"
 	unHealthEventMsgPattern = "%s pod[%s] is unhealthy, msg:%s"
+	FailedSetStoreLabels    = "FailedSetStoreLabels"
 )
 
 // Failover implements the logic for pd/tikv/tidb's failover and recovery.
 type Failover interface {
 	Failover(*v1alpha1.TidbCluster) error
 	Recover(*v1alpha1.TidbCluster)
+	RemoveUndesiredFailures(*v1alpha1.TidbCluster)
 }
